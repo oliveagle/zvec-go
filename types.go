@@ -1,6 +1,9 @@
 package zvec
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // LogType specifies the logger destination.
 type LogType string
@@ -9,6 +12,43 @@ const (
 	LogTypeConsole LogType = "CONSOLE"
 	LogTypeFile    LogType = "FILE"
 )
+
+// StatusCode represents the status code of an operation.
+type StatusCode int
+
+const (
+	StatusCodeOK StatusCode = iota
+	StatusCodeFailed
+	StatusCodeNotFound
+	StatusCodeInvalidArgument
+	StatusCodeAlreadyExists
+	StatusCodePermissionDenied
+	StatusCodeResourceExhausted
+)
+
+// Status represents the result of an operation.
+type Status struct {
+	Code    StatusCode `json:"code"`
+	Message string     `json:"message,omitempty"`
+}
+
+// IsOK returns true if the status is OK.
+func (s Status) IsOK() bool {
+	return s.Code == StatusCodeOK
+}
+
+// Error implements the error interface.
+func (s Status) Error() string {
+	if s.Code == StatusCodeOK {
+		return "OK"
+	}
+	return fmt.Sprintf("Status(code=%d, message=%q)", s.Code, s.Message)
+}
+
+// String returns a string representation of the status.
+func (s Status) String() string {
+	return s.Error()
+}
 
 // LogLevel specifies the minimum log severity.
 type LogLevel string

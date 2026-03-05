@@ -148,3 +148,127 @@ func TestDataTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestIndexParams(t *testing.T) {
+	// Test HnswIndexParam
+	hnsw := NewHnswIndexParam().WithM(32).WithEfConstruction(400).WithEfSearch(256)
+	if hnsw.M != 32 {
+		t.Errorf("Expected M=32, got %d", hnsw.M)
+	}
+	if hnsw.EfConstruction != 400 {
+		t.Errorf("Expected EfConstruction=400, got %d", hnsw.EfConstruction)
+	}
+	if hnsw.EfSearch != 256 {
+		t.Errorf("Expected EfSearch=256, got %d", hnsw.EfSearch)
+	}
+
+	// Test IVFIndexParam
+	ivf := NewIVFIndexParam().WithNList(2048).WithNProbe(16)
+	if ivf.NList != 2048 {
+		t.Errorf("Expected NList=2048, got %d", ivf.NList)
+	}
+	if ivf.NProbe != 16 {
+		t.Errorf("Expected NProbe=16, got %d", ivf.NProbe)
+	}
+
+	// Test FlatIndexParam
+	flat := NewFlatIndexParam().WithMetricType(MetricTypeIP)
+	if flat.MetricType != MetricTypeIP {
+		t.Errorf("Expected MetricTypeIP, got %v", flat.MetricType)
+	}
+
+	// Test InvertIndexParam
+	invert := NewInvertIndexParam().WithEnableRangeOptimization(true)
+	if !invert.EnableRangeOptimization {
+		t.Error("Expected EnableRangeOptimization=true")
+	}
+
+	// Test QueryParams
+	hnswQ := NewHnswQueryParam().WithEf(512)
+	if hnswQ.Ef != 512 {
+		t.Errorf("Expected Ef=512, got %d", hnswQ.Ef)
+	}
+
+	ivfQ := NewIVFQueryParam().WithNProbe(32)
+	if ivfQ.NProbe != 32 {
+		t.Errorf("Expected NProbe=32, got %d", ivfQ.NProbe)
+	}
+}
+
+func TestCollectionOptions(t *testing.T) {
+	// Test CollectionOption
+	opt := DefaultCollectionOption().
+		WithReadOnly(true).
+		WithCreateIfMissing(false).
+		WithErrorIfExists(true)
+
+	if !opt.ReadOnly {
+		t.Error("Expected ReadOnly=true")
+	}
+	if opt.CreateIfMissing {
+		t.Error("Expected CreateIfMissing=false")
+	}
+	if !opt.ErrorIfExists {
+		t.Error("Expected ErrorIfExists=true")
+	}
+
+	// Test IndexOption
+	idxOpt := DefaultIndexOption().WithAsync(true)
+	if !idxOpt.Async {
+		t.Error("Expected Async=true")
+	}
+
+	// Test OptimizeOption
+	optOpt := DefaultOptimizeOption().WithFull(true)
+	if !optOpt.Full {
+		t.Error("Expected Full=true")
+	}
+
+	// Test AddColumnOption
+	addColOpt := DefaultAddColumnOption().WithSkipBackfill(true)
+	if !addColOpt.SkipBackfill {
+		t.Error("Expected SkipBackfill=true")
+	}
+
+	// Test AlterColumnOption
+	alterOpt := DefaultAlterColumnOption().WithSkipReindex(true)
+	if !alterOpt.SkipReindex {
+		t.Error("Expected SkipReindex=true")
+	}
+}
+
+func TestStatus(t *testing.T) {
+	// Test OK status
+	okStatus := Status{Code: StatusCodeOK}
+	if !okStatus.IsOK() {
+		t.Error("Expected IsOK()=true for OK status")
+	}
+
+	// Test Failed status
+	failStatus := Status{Code: StatusCodeFailed, Message: "test error"}
+	if failStatus.IsOK() {
+		t.Error("Expected IsOK()=false for Failed status")
+	}
+	if failStatus.Error() == "" {
+		t.Error("Expected non-empty error message")
+	}
+}
+
+func TestCollectionStatsStruct(t *testing.T) {
+	stats := &CollectionStats{
+		DocCount:  100,
+		SizeBytes: 1024000,
+	}
+	if stats.DocCount != 100 {
+		t.Errorf("Expected DocCount=100, got %d", stats.DocCount)
+	}
+	if stats.SizeBytes != 1024000 {
+		t.Errorf("Expected SizeBytes=1024000, got %d", stats.SizeBytes)
+	}
+
+	// Test String representation
+	s := stats.String()
+	if s == "" {
+		t.Error("Expected non-empty String() representation")
+	}
+}

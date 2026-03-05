@@ -389,3 +389,89 @@ func (v *VectorSchema) String() string {
 	data, _ := json.MarshalIndent(v, "", "  ")
 	return string(data)
 }
+
+// IndexOption contains options for creating an index.
+type IndexOption struct {
+	Async bool `json:"async,omitempty"`
+}
+
+// DefaultIndexOption returns a default IndexOption.
+func DefaultIndexOption() *IndexOption {
+	return &IndexOption{
+		Async: false,
+	}
+}
+
+// WithAsync sets whether to create the index asynchronously.
+func (o *IndexOption) WithAsync(async bool) *IndexOption {
+	o.Async = async
+	return o
+}
+
+// OptimizeOption contains options for optimizing a collection.
+type OptimizeOption struct {
+	Full bool `json:"full,omitempty"`
+}
+
+// DefaultOptimizeOption returns a default OptimizeOption.
+func DefaultOptimizeOption() *OptimizeOption {
+	return &OptimizeOption{
+		Full: false,
+	}
+}
+
+// WithFull sets whether to perform a full optimization.
+func (o *OptimizeOption) WithFull(full bool) *OptimizeOption {
+	o.Full = full
+	return o
+}
+
+// AddColumnOption contains options for adding a column.
+type AddColumnOption struct {
+	SkipBackfill bool `json:"skip_backfill,omitempty"`
+}
+
+// DefaultAddColumnOption returns a default AddColumnOption.
+func DefaultAddColumnOption() *AddColumnOption {
+	return &AddColumnOption{
+		SkipBackfill: false,
+	}
+}
+
+// WithSkipBackfill sets whether to skip backfilling existing documents.
+func (o *AddColumnOption) WithSkipBackfill(skip bool) *AddColumnOption {
+	o.SkipBackfill = skip
+	return o
+}
+
+// AlterColumnOption contains options for altering a column.
+type AlterColumnOption struct {
+	SkipReindex bool `json:"skip_reindex,omitempty"`
+}
+
+// DefaultAlterColumnOption returns a default AlterColumnOption.
+func DefaultAlterColumnOption() *AlterColumnOption {
+	return &AlterColumnOption{
+		SkipReindex: false,
+	}
+}
+
+// WithSkipReindex sets whether to skip reindexing.
+func (o *AlterColumnOption) WithSkipReindex(skip bool) *AlterColumnOption {
+	o.SkipReindex = skip
+	return o
+}
+
+// CollectionStats represents runtime statistics about a collection.
+type CollectionStats struct {
+	DocCount   int64  `json:"doc_count"`
+	SizeBytes  int64  `json:"size_bytes"`
+	MemoryBytes int64 `json:"memory_bytes"`
+	IndexSize  int64  `json:"index_size"`
+}
+
+// String returns a string representation of the stats.
+func (s *CollectionStats) String() string {
+	data, _ := json.MarshalIndent(s, "", "  ")
+	return string(data)
+}
