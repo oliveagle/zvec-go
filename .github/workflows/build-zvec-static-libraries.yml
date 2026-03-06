@@ -28,7 +28,11 @@ jobs:
       - name: Fix CMake compatibility
         run: |
           # Fix cmake_minimum_required version for newer CMake
+          # Fix bazel.cmake
           sed -i 's/cmake_minimum_required(VERSION 3.1 FATAL_ERROR)/cmake_minimum_required(VERSION 3.5 FATAL_ERROR)/g' zvec/cmake/bazel.cmake
+          # Fix all thirdparty CMakeLists.txt files
+          find zvec/thirdparty -name "CMakeLists.txt" -exec sed -i 's/cmake_minimum_required(VERSION [0-9.]* FATAL_ERROR)/cmake_minimum_required(VERSION 3.5 FATAL_ERROR)/g' {} \;
+          find zvec/thirdparty -name "*.cmake" -exec sed -i 's/cmake_minimum_required(VERSION [0-9.]* FATAL_ERROR)/cmake_minimum_required(VERSION 3.5 FATAL_ERROR)/g' {} \;
 
       - name: Build zvec Linux
         run: |
@@ -66,7 +70,11 @@ jobs:
       - name: Fix CMake compatibility
         run: |
           # Fix cmake_minimum_required version for newer CMake
+          # Fix bazel.cmake
           sed -i '' 's/cmake_minimum_required(VERSION 3.1 FATAL_ERROR)/cmake_minimum_required(VERSION 3.5 FATAL_ERROR)/g' zvec/cmake/bazel.cmake
+          # Fix all thirdparty CMakeLists.txt files
+          find zvec/thirdparty -name "CMakeLists.txt" -exec sed -i '' 's/cmake_minimum_required(VERSION [0-9.]* FATAL_ERROR)/cmake_minimum_required(VERSION 3.5 FATAL_ERROR)/g' {} \;
+          find zvec/thirdparty -name "*.cmake" -exec sed -i '' 's/cmake_minimum_required(VERSION [0-9.]* FATAL_ERROR)/cmake_minimum_required(VERSION 3.5 FATAL_ERROR)/g' {} \;
 
       - name: Build zvec macOS arm64
         run: |
@@ -104,7 +112,11 @@ jobs:
       - name: Fix CMake compatibility
         run: |
           # Fix cmake_minimum_required version for newer CMake
+          # Fix bazel.cmake
           sed -i '' 's/cmake_minimum_required(VERSION 3.1 FATAL_ERROR)/cmake_minimum_required(VERSION 3.5 FATAL_ERROR)/g' zvec/cmake/bazel.cmake
+          # Fix all thirdparty CMakeLists.txt files
+          find zvec/thirdparty -name "CMakeLists.txt" -exec sed -i '' 's/cmake_minimum_required(VERSION [0-9.]* FATAL_ERROR)/cmake_minimum_required(VERSION 3.5 FATAL_ERROR)/g' {} \;
+          find zvec/thirdparty -name "*.cmake" -exec sed -i '' 's/cmake_minimum_required(VERSION [0-9.]* FATAL_ERROR)/cmake_minimum_required(VERSION 3.5 FATAL_ERROR)/g' {} \;
 
       - name: Build zvec macOS x86_64
         run: |
@@ -144,7 +156,17 @@ jobs:
       - name: Fix CMake compatibility
         run: |
           # Fix cmake_minimum_required version for newer CMake
+          # Fix bazel.cmake
           (Get-Content zvec/cmake/bazel.cmake) -replace 'cmake_minimum_required\(VERSION 3.1 FATAL_ERROR\)', 'cmake_minimum_required(VERSION 3.5 FATAL_ERROR)' | Set-Content zvec/cmake/bazel.cmake
+          # Fix all thirdparty CMakeLists.txt files
+          Get-ChildItem -Path zvec/thirdparty -Recurse -Filter CMakeLists.txt | ForEach-Object {
+            $content = (Get-Content $_.FullName) -replace 'cmake_minimum_required\(VERSION [0-9.]* FATAL_ERROR\)', 'cmake_minimum_required(VERSION 3.5 FATAL_ERROR)'
+            $content | Set-Content $_.FullName
+          }
+          Get-ChildItem -Path zvec/thirdparty -Recurse -Filter *.cmake | ForEach-Object {
+            $content = (Get-Content $_.FullName) -replace 'cmake_minimum_required\(VERSION [0-9.]* FATAL_ERROR\)', 'cmake_minimum_required(VERSION 3.5 FATAL_ERROR)'
+            $content | Set-Content $_.FullName
+          }
 
       - name: Build zvec Windows
         run: |
