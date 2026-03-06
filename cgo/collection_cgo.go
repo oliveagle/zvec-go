@@ -37,8 +37,10 @@ import "unsafe"
 import "sync"
 
 /*
-#cgo LDFLAGS: -I./zvec
--L/usr/local/lib -L/usr/local/lib/x86_64-linux-gnu
+#cgo darwin CFLAGS: -I./zvec
+#cgo darwin LDFLAGS: -L./lib -lzvec_core-macos-${GOARCH} -lzvec_ailego-macos-${GOARCH} -lstdc++ -lpthread -lm
+#cgo linux CFLAGS: -I./zvec
+#cgo linux LDFLAGS: -L./lib -lzvec_core-linux-${GOARCH} -lzvec_ailego-linux-${GOARCH} -lstdc++ -lpthread -lm
 */
 
 // #include "zvec/db/status.h"
