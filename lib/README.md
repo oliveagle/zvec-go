@@ -22,9 +22,18 @@ Libraries are named as: `libzvec_core-<os>-<arch>.a`
 | macOS | x86_64 | `libzvec_ailego-macos-x86_64.a` |
 | Windows | x86_64 | `libzvec_ailego-windows-x86_64.lib` |
 
-## Git Hash
+## zvec version
 
-Libraries are built from zvec C++ core at git commit: `__GIT_HASH__`
+Libraries are built from the `zvec` C++ submodule, which is pinned to a specific
+version in this repository (currently **v0.7.0** — see `zvec/`). The exact source
+commit is recorded in the `zvec` gitlink.
+
+Libraries are rebuilt and committed automatically by the
+[`build-zvec-static-libraries`](../.github/workflows/build-zvec-static-libraries.yml)
+GitHub Actions workflow whenever the `zvec/` submodule or the workflow changes, so the
+checked-in `.a` files track the pinned zvec version. The filename convention below
+(`libzvec_core-<os>-<arch>.a`) is what the CGO build tags in `../cgo/` link against;
+the `*-<git-hash>.a` variants are historical artifacts from manual builds.
 
 ## Usage
 

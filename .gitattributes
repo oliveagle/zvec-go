@@ -1,0 +1,3 @@
+# Static libraries are committed as regular binary blobs (no Git-LFS).
+*.a -text -diff
+*.lib -text -diff

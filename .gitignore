@@ -34,3 +34,10 @@ Thumbs.db
 # Test data
 /testdata/
 /tmp/
+
+# zvec-httpd service binary (built output)
+zvec-httpd
+/zvec-httpd
+
+# Default service data directory
+/data/
