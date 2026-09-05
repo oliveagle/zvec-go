@@ -35,8 +35,8 @@ Thumbs.db
 /testdata/
 /tmp/
 
-# zvec-httpd service binary (built output)
-zvec-httpd
+# zvec-httpd service binary (built output; root-anchored so it does not
+# match the cmd/zvec-httpd source directory)
 /zvec-httpd
 
 # Default service data directory

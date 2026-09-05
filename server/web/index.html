@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zvec 控制台</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #171e2e; --panel2: #1d2639; --border: #2a3550;
+    --text: #e6ecf7; --muted: #8b97b3; --accent: #4f8cff; --accent2: #2f6fe0;
+    --ok: #34d399; --err: #f87171; --chip: #24304a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  h1 { font-size: 18px; margin: 0; }
+  h2 { font-size: 15px; margin: 0 0 10px; color: var(--text); }
+  h3 { font-size: 13px; margin: 14px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .topbar {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 18px; background: var(--panel); border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .topbar .brand { font-weight: 700; font-size: 16px; }
+  .topbar .brand span { color: var(--accent); }
+  .topbar form { display: flex; gap: 6px; flex: 1; max-width: 640px; }
+  .topbar input {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 10px; border-radius: 7px; outline: none; min-width: 0;
+  }
+  .topbar input:focus { border-color: var(--accent); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .dot.off { background: var(--err); }
+  .status { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .wrap { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px 18px; align-items: start; }
+  @media (max-width: 860px) { .wrap { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .grow { flex: 1; min-width: 0; }
+  button, .btn {
+    background: var(--accent2); color: #fff; border: 0; border-radius: 8px;
+    padding: 8px 12px; font-size: 13px; cursor: pointer; font-weight: 600;
+  }
+  button:hover { background: var(--accent); }
+  button.ghost { background: var(--panel2); color: var(--text); border: 1px solid var(--border); }
+  button.ghost:hover { background: var(--chip); }
+  button.danger { background: #7f1d1d; } button.danger:hover { background: #991b1b; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  input, textarea, select {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 9px; border-radius: 7px; outline: none; width: 100%; font: inherit;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 70px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr.clickable { cursor: pointer; } tr.clickable:hover { background: var(--panel2); }
+  tr.active { background: var(--chip); }
+  .chip { display: inline-block; background: var(--chip); color: var(--text); border-radius: 20px; padding: 2px 9px; font-size: 11px; margin: 2px 4px 2px 0; }
+  .chip.dim { color: var(--muted); }
+  .score { font-variant-numeric: tabular-nums; font-family: ui-monospace, Menlo, monospace; }
+  .muted { color: var(--muted); }
+  .toast {
+    position: fixed; right: 18px; bottom: 18px; max-width: 420px; z-index: 100;
+    background: var(--panel2); border: 1px solid var(--border); border-left: 4px solid var(--accent);
+    border-radius: 8px; padding: 12px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  .toast.err { border-left-color: var(--err); }
+  .toast.ok { border-left-color: var(--ok); }
+  .toast .t { font-weight: 600; } .toast .m { font-size: 12px; color: var(--muted); margin-top: 2px; word-break: break-word; }
+  .hidden { display: none !important; }
+  .fieldgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+  .small { font-size: 12px; }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">zvec <span>控制台</span></div>
+    <form id="loginForm">
+      <input id="username" type="text" placeholder="用户名" autocomplete="username" class="grow">
+      <input id="password" type="password" placeholder="密码" autocomplete="current-password" style="flex:1.4">
+      <button type="submit">连接</button>
+    </form>
+    <div class="status"><span id="dot" class="dot"></span> <span id="statusText">未连接</span></div>
+  </div>
+
+  <div class="wrap">
+    <!-- Left: collections -->
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:6px">
+        <h2>集合 / 表</h2>
+        <button id="btnNewColl" class="ghost">＋ 新建</button>
+      </div>
+
+      <div id="createForm" class="hidden" style="border-top:1px solid var(--border);padding-top:10px;margin-top:6px">
+        <label>名称</label>
+        <input id="collName" type="text" placeholder="例如: movies">
+        <label>描述（可选）</label>
+        <input id="collDesc" type="text" placeholder="可选">
+        <h3>标量字段</h3>
+        <div id="scalarFields"></div>
+        <button class="ghost" id="addScalar" type="button">＋ 字段</button>
+        <h3>向量字段</h3>
+        <div id="vectorFields"></div>
+        <button class="ghost" id="addVector" type="button">＋ 向量</button>
+        <div class="row" style="margin-top:12px">
+          <button id="btnCreateColl" type="button">创建</button>
+          <button id="btnCancelColl" class="ghost" type="button">取消</button>
+        </div>
+      </div>
+
+      <div style="margin-top:10px">
+        <table>
+          <thead><tr><th>名称</th><th>文档</th><th></th></tr></thead>
+          <tbody id="collRows"></tbody>
+        </table>
+        <div id="collEmpty" class="muted small" style="margin-top:8px">暂无集合，点击“新建”创建。</div>
+      </div>
+    </div>
+
+    <!-- Right: detail -->
+    <div>
+      <div id="detailEmpty" class="card"><div class="muted">从左侧选择一个集合查看文档与查询。</div></div>
+
+      <div id="detail" class="hidden">
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <h2 id="collTitle">集合</h2>
+            <div class="row">
+              <button id="btnRefreshDocs" class="ghost">刷新</button>
+              <button id="btnDeleteColl" class="danger">删除集合</button>
+            </div>
+          </div>
+          <div id="collSchema"></div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="row" style="justify-content:space-between;margin-bottom:8px">
+            <h2>文档</h2>
+            <button id="btnNewDoc" class="ghost">＋ 新增文档</button>
+          </div>
+          <div id="docForm" class="hidden" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:10px">
+            <label>文档 ID</label>
+            <input id="docId" type="text" placeholder="唯一 ID">
+            <div id="docFields" class="fieldgrid"></div>
+            <div class="row" style="margin-top:12px">
+              <button id="btnSaveDoc" type="button">保存</button>
+              <button id="btnCancelDoc" class="ghost" type="button">取消</button>
+            </div>
+          </div>
+          <table>
+            <thead id="docHead"></thead>
+            <tbody id="docRows"></tbody>
+          </table>
+          <div id="docEmpty" class="muted small" style="margin-top:8px">暂无文档。</div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <h2>向量查询</h2>
+          <div class="fieldgrid" style="margin-bottom:8px">
+            <div>
+              <label>向量字段</label>
+              <select id="qField"></select>
+            </div>
+            <div>
+              <label>Top-K</label>
+              <input id="qTopK" type="number" value="10" min="1">
+            </div>
+          </div>
+          <label>查询向量（逗号分隔，例如 0.1,0.2,0.3,…）</label>
+          <textarea id="qVector" placeholder="逗号或空格分隔的浮点数"></textarea>
+          <div class="row" style="margin-top:10px">
+            <button id="btnQuery" type="button">查询</button>
+            <button id="btnCopyQ" class="ghost" type="button">填入示例</button>
+          </div>
+          <div id="qResultsWrap" style="margin-top:12px">
+            <h3>结果</h3>
+            <table>
+              <thead id="qHead"></thead>
+              <tbody id="qRows"></tbody>
+            </table>
+            <div id="qEmpty" class="muted small">执行查询后显示结果。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const state = { user: "", pass: "", connected: false, collection: null, schema: null, docs: [] };
+
+// ---------- auth + api ----------
+function authHeader() {
+  if (!state.user && !state.pass) return {};
+  const token = btoa(state.user + ":" + state.pass);
+  return { Authorization: "Basic " + token };
+}
+async function api(method, path, body) {
+  const opts = { method, headers: Object.assign({ "Content-Type": "application/json" }, authHeader()) };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  let data = null;
+  const text = await res.text();
+  if (text) { try { data = JSON.parse(text); } catch (e) { data = { error: text }; } }
+  return { status: res.status, data };
+}
+function toast(msg, type) {
+  let t = document.querySelector(".toast");
+  if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }
+  t.className = "toast " + (type || "");
+  t.innerHTML = '<div class="t">' + esc(msg) + '</div>';
+  clearTimeout(toast._h); toast._h = setTimeout(() => t.remove(), 4200);
+}
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function setConnected(on, msg) {
+  state.connected = on;
+  $("dot").className = "dot " + (on ? "on" : (msg ? "off" : ""));
+  $("statusText").textContent = on ? "已连接" : (msg || "未连接");
+}
+
+// ---------- login ----------
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  state.user = $("username").value.trim();
+  state.pass = $("password").value;
+  if (!state.user) { toast("请输入用户名", "err"); return; }
+  const r = await api("GET", "/api/v1/collections");
+  if (r.status === 200) { setConnected(true); localStorage.setItem("zvec_user", state.user); await loadCollections(); toast("连接成功", "ok"); }
+  else if (r.status === 401) { setConnected(false, "认证失败"); toast("用户名或密码错误", "err"); }
+  else { setConnected(false, "错误"); toast("连接失败: " + JSON.stringify(r.data), "err"); }
+});
+
+// ---------- collections ----------
+async function loadCollections() {
+  if (!state.connected) return;
+  const r = await api("GET", "/api/v1/collections");
+  if (r.status === 401) { setConnected(false, "会话失效"); toast("认证已过期，请重新连接", "err"); return; }
+  if (r.status !== 200) { toast("加载集合失败: " + JSON.stringify(r.data), "err"); return; }
+  const colls = r.data.collections || [];
+  state.collections = colls;
+  const rows = $("collRows"); rows.innerHTML = "";
+  $("collEmpty").style.display = colls.length ? "none" : "block";
+  for (const c of colls) {
+    const tr = document.createElement("tr");
+    tr.className = "clickable" + (state.collection === c.name ? " active" : "");
+    tr.innerHTML = '<td>' + esc(c.name) + (c.description ? ' <span class="muted small">' + esc(c.description) + '</span>' : '') +
+      '</td><td class="score">' + c.doc_count + '</td><td></td>';
+    tr.addEventListener("click", (ev) => { if (ev.target.tagName === "BUTTON") return; selectCollection(c.name); });
+    const act = document.createElement("td");
+    const del = document.createElement("button"); del.className = "danger"; del.textContent = "删除"; del.style.padding = "4px 8px";
+    del.addEventListener("click", async (ev) => { ev.stopPropagation(); await deleteCollection(c.name); });
+    act.appendChild(del); tr.appendChild(act);
+    rows.appendChild(tr);
+  }
+}
+async function selectCollection(name) {
+  const r = await api("GET", "/api/v1/collections/" + encodeURIComponent(name));
+  if (r.status !== 200) { toast("打开集合失败: " + JSON.stringify(r.data), "err"); return; }
+  state.collection = name; state.schema = r.data.schema || {};
+  $("detailEmpty").classList.add("hidden"); $("detail").classList.remove("hidden");
+  $("collTitle").textContent = name;
+  renderSchema();
+  fillQueryFields();
+  await loadCollections();
+  await loadDocuments();
+}
+function renderSchema() {
+  const s = state.schema || {};
+  let html = "";
+  const fields = (s.fields || []).map((f) => '<span class="chip">' + esc(f.name) + ' <span class="dim">' + esc(f.data_type) + '</span></span>');
+  const vecs = (s.vector_fields || []).map((f) => '<span class="chip">' + esc(f.name) + ' <span class="dim">' + esc(f.data_type) + ' ' + f.dimension + 'd ' + esc(f.metric_type || "") + '</span></span>');
+  if (fields.length) html += '<h3>标量字段</h3><div>' + fields.join("") + '</div>';
+  if (vecs.length) html += '<h3>向量字段</h3><div>' + vecs.join("") + '</div>';
+  if (!fields.length && !vecs.length) html = '<div class="muted small">无字段定义。</div>';
+  $("collSchema").innerHTML = html;
+}
+async function deleteCollection(name) {
+  if (!confirm('确定删除集合 "' + name + '" 及其全部数据？此操作不可撤销。')) return;
+  const r = await api("DELETE", "/api/v1/collections/" + encodeURIComponent(name));
+  if (r.status === 204 || r.status === 200) { toast('已删除 "' + name + '"', "ok"); if (state.collection === name) { state.collection = null; $("detail").classList.add("hidden"); $("detailEmpty").classList.remove("hidden"); } await loadCollections(); }
+  else toast("删除失败: " + JSON.stringify(r.data), "err");
+}
+
+// ---------- create collection form ----------
+const SCALAR_TYPES = ["INT32","INT64","UINT32","UINT64","FLOAT","DOUBLE","STRING","BOOL"];
+const VECTOR_TYPES = ["VECTOR_FP16","VECTOR_FP32","VECTOR_FP64","VECTOR_INT8"];
+const METRICS = ["COSINE","L2","IP"];
+$("btnNewColl").addEventListener("click", () => { toggleCreate(!$("createForm").classList.contains("hidden")); });
+$("btnCancelColl").addEventListener("click", () => toggleCreate(false));
+function toggleCreate(show) { $("createForm").classList.toggle("hidden", !show); if (show) { clearCreateForm(); } }
+function clearCreateForm() { $("collName").value = ""; $("collDesc").value = ""; $("scalarFields").innerHTML = ""; $("vectorFields").innerHTML = ""; addScalarRow(); addVectorRow(); }
+function typeOptions(list) { return list.map((t) => '<option value="' + t + '">' + t + '</option>').join(""); }
+function addScalarRow() {
+  const d = document.createElement("div"); d.className = "row"; d.style.marginBottom = "6px";
+  d.innerHTML = '<input class="grow" placeholder="字段名" data-k="name">' +
+    '<select style="width:130px" data-k="type">' + typeOptions(SCALAR_TYPES) + '</select>';
+  $("scalarFields").appendChild(d);
+}
+function addVectorRow() {
+  const d = document.createElement("div"); d.className = "row"; d.style.marginBottom = "6px";
+  d.innerHTML = '<input class="grow" placeholder="向量字段名" data-k="name">' +
+    '<select style="width:120px" data-k="type">' + typeOptions(VECTOR_TYPES) + '</select>' +
+    '<input style="width:70px" placeholder="维度" data-k="dim" type="number">' +
+    '<select style="width:90px" data-k="metric">' + METRICS.map((m) => '<option>' + m + '</option>').join("") + '</select>';
+  $("vectorFields").appendChild(d);
+}
+$("addScalar").addEventListener("click", addScalarRow);
+$("addVector").addEventListener("click", addVectorRow);
+$("btnCreateColl").addEventListener("click", async () => {
+  const name = $("collName").value.trim();
+  if (!name) { toast("请填写集合名称", "err"); return; }
+  const body = { name, description: $("collDesc").value.trim(), fields: [], vector_fields: [] };
+  $("scalarFields").querySelectorAll(".row").forEach((r) => {
+    const n = r.querySelector('[data-k=name]').value.trim(); const t = r.querySelector('[data-k=type]').value;
+    if (n) body.fields.push({ name: n, data_type: t });
+  });
+  $("vectorFields").querySelectorAll(".row").forEach((r) => {
+    const n = r.querySelector('[data-k=name]').value.trim(); const t = r.querySelector('[data-k=type]').value;
+    const dim = parseInt(r.querySelector('[data-k=dim]').value || "0", 10); const m = r.querySelector('[data-k=metric]').value;
+    if (n) body.vector_fields.push({ name: n, data_type: t, dimension: dim, metric_type: m });
+  });
+  if (!body.fields.length && !body.vector_fields.length) { toast("至少需要一个字段或向量字段", "err"); return; }
+  const r = await api("POST", "/api/v1/collections", body);
+  if (r.status === 201) { toast('已创建 "' + name + '"', "ok"); toggleCreate(false); await loadCollections(); selectCollection(name); }
+  else toast("创建失败: " + JSON.stringify(r.data), "err");
+});
+
+// ---------- documents ----------
+function fieldTypes() { return (state.schema && state.schema.fields) || []; }
+function vectorTypes() { return (state.schema && state.schema.vector_fields) || []; }
+async function loadDocuments() {
+  if (!state.collection) return;
+  const r = await api("GET", "/api/v1/collections/" + encodeURIComponent(state.collection) + "/documents?limit=200");
+  if (r.status !== 200) { toast("加载文档失败: " + JSON.stringify(r.data), "err"); return; }
+  state.docs = r.data.documents || [];
+  renderDocs();
+}
+function renderDocs() {
+  const fields = fieldTypes();
+  const head = $("docHead"); const rows = $("docRows");
+  head.innerHTML = ""; rows.innerHTML = "";
+  const cols = ["ID"].concat(fields.map((f) => f.name));
+  head.innerHTML = "<tr>" + cols.map((c) => "<th>" + esc(c) + "</th>") + "<th></th></tr>";
+  $("docEmpty").style.display = state.docs.length ? "none" : "block";
+  for (const d of state.docs) {
+    const tr = document.createElement("tr");
+    let html = "<td class='score'>" + esc(d.id) + "</td>";
+    for (const f of fields) {
+      let v = d.fields ? d.fields[f.name] : undefined;
+      html += "<td>" + (v === undefined || v === null ? '<span class="muted">—</span>' : esc(v)) + "</td>";
+    }
+    const btn = document.createElement("button"); btn.className = "danger"; btn.style.padding = "3px 8px"; btn.textContent = "删除";
+    btn.addEventListener("click", () => deleteDocument(state.collection, d.id));
+    tr.innerHTML = html + "<td></td>"; tr.lastElementChild.appendChild(btn);
+    rows.appendChild(tr);
+  }
+}
+async function deleteDocument(coll, id) {
+  if (!confirm('确定删除文档 "' + id + '"？')) return;
+  const r = await api("DELETE", "/api/v1/collections/" + encodeURIComponent(coll) + "/documents/" + encodeURIComponent(id));
+  if (r.status === 204 || r.status === 200) { toast("已删除文档 " + id, "ok"); await loadDocuments(); await loadCollections(); }
+  else toast("删除失败: " + JSON.stringify(r.data), "err");
+}
+$("btnRefreshDocs").addEventListener("click", loadDocuments);
+$("btnNewDoc").addEventListener("click", () => {
+  if ($("docForm").classList.contains("hidden")) buildDocForm(); else $("docForm").classList.add("hidden");
+});
+$("btnCancelDoc").addEventListener("click", () => $("docForm").classList.add("hidden"));
+function buildDocForm() {
+  $("docForm").classList.remove("hidden");
+  $("docId").value = "";
+  const box = $("docFields"); box.innerHTML = "";
+  for (const f of fieldTypes()) {
+    const w = document.createElement("div"); w.style.marginBottom = "8px";
+    w.innerHTML = '<label>' + esc(f.name) + ' <span class="dim">' + esc(f.data_type) + '</span></label><input data-field="' + esc(f.name) + '" placeholder="' + esc(f.data_type) + '">';
+    box.appendChild(w);
+  }
+  for (const v of vectorTypes()) {
+    const w = document.createElement("div"); w.style.marginBottom = "8px";
+    w.innerHTML = '<label>' + esc(v.name) + ' <span class="dim">' + esc(v.data_type) + ' ' + v.dimension + 'd</span> 逗号分隔</label><input data-vec="' + esc(v.name) + '" placeholder="0.1,0.2,…">';
+    box.appendChild(w);
+  }
+}
+function parseVector(str, expectDim) {
+  const parts = String(str).split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+  const out = parts.map(Number);
+  if (out.some((x) => Number.isNaN(x))) return null;
+  if (expectDim && out.length !== expectDim) return null;
+  return out;
+}
+$("btnSaveDoc").addEventListener("click", async () => {
+  const id = $("docId").value.trim();
+  if (!id) { toast("请填写文档 ID", "err"); return; }
+  const doc = { id, fields: {}, vectors: {} };
+  let ok = true;
+  for (const f of fieldTypes()) {
+    const el = $("docFields").querySelector('[data-field="' + f.name + '"]');
+    if (!el || el.value === "") continue;
+    const raw = el.value;
+    if (f.data_type === "STRING") doc.fields[f.name] = raw;
+    else { const n = Number(raw); doc.fields[f.name] = Number.isNaN(n) ? raw : n; }
+  }
+  for (const v of vectorTypes()) {
+    const el = $("docFields").querySelector('[data-vec="' + v.name + '"]');
+    if (!el || el.value.trim() === "") continue;
+    const vec = parseVector(el.value, v.dimension);
+    if (!vec) { toast('向量字段 "' + v.name + '" 需要 ' + v.dimension + ' 个数字', "err"); ok = false; break; }
+    doc.vectors[v.name] = vec;
+  }
+  if (!ok) return;
+  const r = await api("POST", "/api/v1/collections/" + encodeURIComponent(state.collection) + "/documents", { document: doc });
+  if (r.status === 200) { toast("已保存文档 " + id, "ok"); $("docForm").classList.add("hidden"); await loadDocuments(); await loadCollections(); }
+  else toast("保存失败: " + JSON.stringify(r.data), "err");
+});
+
+// ---------- query ----------
+function fillQueryFields() {
+  const sel = $("qField"); sel.innerHTML = "";
+  const vecs = vectorTypes();
+  if (!vecs.length) { $("qField").innerHTML = '<option value="">（无向量字段）</option>'; return; }
+  for (const v of vecs) { const o = document.createElement("option"); o.value = v.name; o.textContent = v.name + " (" + v.dimension + "d)"; sel.appendChild(o); }
+}
+$("btnCopyQ").addEventListener("click", () => {
+  const v = vectorTypes()[0]; if (!v) { toast("该集合没有向量字段", "err"); return; }
+  $("qField").value = v.name;
+  $("qVector").value = Array.from({ length: v.dimension }, (_, i) => (Math.random()).toFixed(3)).join(",");
+});
+$("btnQuery").addEventListener("click", async () => {
+  const field = $("qField").value;
+  if (!field) { toast("请选择向量字段", "err"); return; }
+  const spec = vectorTypes().find((v) => v.name === field);
+  const vec = parseVector($("qVector").value, spec ? spec.dimension : 0);
+  if (!vec) { toast("查询向量无效" + (spec ? "（需 " + spec.dimension + " 维）" : ""), "err"); return; }
+  const body = { field, vector: vec, top_k: parseInt($("qTopK").value || "10", 10), include_vector: true };
+  const r = await api("POST", "/api/v1/collections/" + encodeURIComponent(state.collection) + "/query", body);
+  if (r.status !== 200) { toast("查询失败: " + JSON.stringify(r.data), "err"); return; }
+  renderQueryResults(r.data.results || [], r.data.took_ms);
+});
+function renderQueryResults(results, took) {
+  const head = $("qHead"); const rows = $("qRows");
+  head.innerHTML = ""; rows.innerHTML = "";
+  const fields = fieldTypes();
+  const cols = ["ID", "Score"].concat(fields.map((f) => f.name));
+  head.innerHTML = "<tr>" + cols.map((c) => "<th>" + esc(c) + "</th>") + "</tr>";
+  $("qEmpty").style.display = results.length ? "none" : "block";
+  for (const d of results) {
+    const tr = document.createElement("tr");
+    let html = "<td class='score'>" + esc(d.id) + "</td><td class='score'>" + (d.score).toFixed(5) + "</td>";
+    for (const f of fields) {
+      const v = d.fields ? d.fields[f.name] : undefined;
+      html += "<td>" + (v === undefined || v === null ? '<span class="muted">—</span>' : esc(v)) + "</td>";
+    }
+    tr.innerHTML = html; rows.appendChild(tr);
+  }
+  $("qResultsWrap").style.display = results.length ? "block" : "none";
+  if (results.length) toast("返回 " + results.length + " 条结果，耗时 " + took + "ms", "ok");
+}
+$("btnDeleteColl").addEventListener("click", () => deleteCollection(state.collection));
+
+// ---------- boot ----------
+(async function boot() {
+  const h = await fetch("/healthz").then((r) => r.json()).catch(() => null);
+  fillQueryFields();
+  if (h && !h.auth_enabled) { setConnected(true, "已连接（无需认证）"); await loadCollections(); if (state.collections && state.collections.length && !state.collection) selectCollection(state.collections[0].name); }
+  // Remembered username: try to reconnect automatically.
+  if (localStorage.getItem("zvec_user")) { $("username").value = localStorage.getItem("zvec_user"); $("loginForm").requestSubmit(); }
+})();
+</script>
+</body>
+</html>
