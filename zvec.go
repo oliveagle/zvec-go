@@ -122,10 +122,11 @@ func Open(path string, option *CollectionOption) (*Collection, error) {
 
 // CreateAndOpen creates a new collection and opens it.
 func (z *Zvec) CreateAndOpen(path string, schema *CollectionSchema, option *CollectionOption) (*Collection, error) {
-	z.mu.Lock()
-	defer z.mu.Unlock()
+	z.mu.RLock()
+	init := z.initialized
+	z.mu.RUnlock()
 
-	if !z.initialized {
+	if !init {
 		return nil, fmt.Errorf("zvec not initialized")
 	}
 
@@ -169,10 +170,11 @@ func (z *Zvec) CreateAndOpen(path string, schema *CollectionSchema, option *Coll
 
 // Open opens an existing collection.
 func (z *Zvec) Open(path string, option *CollectionOption) (*Collection, error) {
-	z.mu.Lock()
-	defer z.mu.Unlock()
+	z.mu.RLock()
+	init := z.initialized
+	z.mu.RUnlock()
 
-	if !z.initialized {
+	if !init {
 		return nil, fmt.Errorf("zvec not initialized")
 	}
 
@@ -193,7 +195,7 @@ func (z *Zvec) Open(path string, option *CollectionOption) (*Collection, error) 
 	}
 
 	var metaData struct {
-		Name   string           `json:"name"`
+		Name   string            `json:"name"`
 		Schema *CollectionSchema `json:"schema"`
 		Option *CollectionOption `json:"option"`
 	}
@@ -201,10 +203,16 @@ func (z *Zvec) Open(path string, option *CollectionOption) (*Collection, error) 
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 
-	return &Collection{
+	coll := &Collection{
 		path:   path,
 		schema: metaData.Schema,
 		option: option,
 		docs:   make(map[string]*Document),
-	}, nil
+	}
+
+	// Load persisted documents so queries/listings work after a restart.
+	if err := coll.loadDocs(); err != nil {
+		return nil, fmt.Errorf("failed to load documents from %s: %w", path, err)
+	}
+	return coll, nil
 }

@@ -3,8 +3,11 @@ package zvec
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 )
 
@@ -158,14 +161,14 @@ func (c *Collection) Get(id string) (*Document, error) {
 	}
 
 	doc, ok := c.docs[id]
-	if !ok {
-		// Try to load from disk
-		var err error
-		doc, err = c.readDocument(id)
-		if err != nil {
-			return nil, fmt.Errorf("document not found: %s", id)
-		}
-		c.docs[id] = doc
+	if ok {
+		return doc, nil
+	}
+	// Not in memory; load from disk (best-effort). We intentionally do not
+	// cache here while holding a read lock to avoid a write under RLock.
+	doc, err := c.readDocument(id)
+	if err != nil {
+		return nil, fmt.Errorf("document not found: %s", id)
 	}
 	return doc, nil
 }
@@ -243,7 +246,7 @@ func (c *Collection) Search(query *VectorQuery) ([]*SearchResult, error) {
 		if !ok {
 			continue
 		}
-		score := cosineSimilarity(queryVec, vec)
+		score := similarity(queryVec, vec, c.metricFor(query.FieldName))
 		results = append(results, &SearchResult{
 			ID:       id,
 			Score:    score,
@@ -251,8 +254,10 @@ func (c *Collection) Search(query *VectorQuery) ([]*SearchResult, error) {
 		})
 	}
 
-	// Sort and limit results
-	// TODO: Implement proper sorting
+	// Sort by score (descending), then limit to TopK.
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
 	if query.TopK > 0 && len(results) > query.TopK {
 		results = results[:query.TopK]
 	}
@@ -285,6 +290,7 @@ func (c *Collection) ListIDs() ([]string, error) {
 	for id := range c.docs {
 		ids = append(ids, id)
 	}
+	sort.Strings(ids)
 	return ids, nil
 }
 
@@ -325,7 +331,85 @@ func (c *Collection) deleteDocument(id string) error {
 	return os.Remove(c.docPath(id))
 }
 
-// cosineSimilarity computes cosine similarity between two vectors.
+// loadDocs populates the in-memory document map from disk so that queries,
+// listings, and statistics reflect persisted data across process restarts.
+// Callers must not already hold c.mu.
+func (c *Collection) loadDocs() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.docs == nil {
+		c.docs = make(map[string]*Document)
+	}
+
+	docsDir := filepath.Join(c.path, "docs")
+	entries, err := os.ReadDir(docsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(docsDir, name))
+		if err != nil {
+			continue
+		}
+		var doc Document
+		if err := json.Unmarshal(data, &doc); err != nil {
+			continue
+		}
+		if doc.ID == "" {
+			doc.ID = strings.TrimSuffix(name, ".json")
+		}
+		c.docs[doc.ID] = &doc
+	}
+	return nil
+}
+
+// ListDocs returns documents in the collection in stable (ID) order, applying
+// an optional offset and limit. A limit of 0 means "no limit".
+func (c *Collection) ListDocs(offset, limit int) ([]*Document, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.closed {
+		return nil, fmt.Errorf("collection is closed")
+	}
+
+	ids := make([]string, 0, len(c.docs))
+	for id := range c.docs {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(ids) {
+		offset = len(ids)
+	}
+	ids = ids[offset:]
+	if limit > 0 && len(ids) > limit {
+		ids = ids[:limit]
+	}
+
+	out := make([]*Document, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, c.docs[id])
+	}
+	return out, nil
+}
+
+// cosineSimilarity computes cosine similarity between two vectors in [-1,1].
 func cosineSimilarity(a, b []float32) float64 {
 	if len(a) != len(b) {
 		return 0.0
@@ -342,7 +426,45 @@ func cosineSimilarity(a, b []float32) float64 {
 		return 0.0
 	}
 
-	return dotProduct / (normA * normB)
+	return dotProduct / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
+// metricFor returns the metric type configured for a vector field. The caller
+// must already hold c.mu (at least RLock). It defaults to COSINE.
+func (c *Collection) metricFor(fieldName string) MetricType {
+	if c.schema != nil {
+		for _, v := range c.schema.VectorFields {
+			if v.Name == fieldName && v.MetricType != "" {
+				return v.MetricType
+			}
+		}
+	}
+	return MetricTypeCOSINE
+}
+
+// similarity returns a score where HIGHER means more similar, for the given
+// metric. It is used to order search/query results (descending).
+func similarity(a, b []float32, metric MetricType) float64 {
+	if len(a) != len(b) {
+		return math.Inf(-1)
+	}
+	switch metric {
+	case MetricTypeIP:
+		var dot float64
+		for i := range a {
+			dot += float64(a[i] * b[i])
+		}
+		return dot
+	case MetricTypeL2:
+		var d2 float64
+		for i := range a {
+			d := float64(a[i] - b[i])
+			d2 += d * d
+		}
+		return -d2
+	default: // MetricTypeCOSINE
+		return cosineSimilarity(a, b)
+	}
 }
 
 // String returns a string representation of the document.
@@ -364,13 +486,10 @@ func (c *Collection) Destroy() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed {
-		return fmt.Errorf("collection is already closed")
-	}
-
 	c.closed = true
 
-	// Remove the collection directory
+	// Remove the collection directory. Idempotent: destroying an already
+	// closed collection simply (re)removes the data.
 	return os.RemoveAll(c.path)
 }
 
@@ -402,11 +521,18 @@ func (c *Collection) Stats() (*CollectionStats, error) {
 		return nil, fmt.Errorf("collection is closed")
 	}
 
-	// Calculate size
+	// Calculate on-disk size by summing the sizes of all document files.
 	var sizeBytes int64
 	docsDir := filepath.Join(c.path, "docs")
-	if info, err := os.Stat(docsDir); err == nil {
-		sizeBytes = info.Size()
+	if entries, err := os.ReadDir(docsDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if fi, err := e.Info(); err == nil {
+				sizeBytes += fi.Size()
+			}
+		}
 	}
 
 	return &CollectionStats{
@@ -696,7 +822,7 @@ func (c *Collection) Query(query *VectorQuery, topk int, filter string, includeV
 		if !ok {
 			continue
 		}
-		score := cosineSimilarity(queryVec, vec)
+		score := similarity(queryVec, vec, c.metricFor(query.FieldName))
 
 		// Build result with selected fields
 		result := &QueryResult{
@@ -730,8 +856,11 @@ func (c *Collection) Query(query *VectorQuery, topk int, filter string, includeV
 		results = append(results, result)
 	}
 
-	// Sort by score (descending) and limit
-	if len(results) > topk {
+	// Sort by score (descending), then limit to topk.
+	sort.SliceStable(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+	if topk > 0 && len(results) > topk {
 		results = results[:topk]
 	}
 
