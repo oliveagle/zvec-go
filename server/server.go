@@ -39,7 +39,7 @@ func New(cfg *Config, log *slog.Logger) (*Server, error) {
 		return nil, fmt.Errorf("initialize zvec: %w", err)
 	}
 
-	mgr, err := NewCollectionManager(cfg.Storage.DataDir)
+	mgr, err := NewCollectionManager(cfg.Storage.DataDir, log)
 	if err != nil {
 		return nil, err
 	}

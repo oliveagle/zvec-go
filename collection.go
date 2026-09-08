@@ -799,9 +799,12 @@ func (c *Collection) UpsertBatch(docs []*Document) (int, error) {
 	}
 
 	count := 0
-	for _, doc := range docs {
-		if doc == nil || ValidateDocID(doc.ID) != nil {
-			continue
+	for i, doc := range docs {
+		if doc == nil {
+			return count, fmt.Errorf("documents[%d] is nil", i)
+		}
+		if err := ValidateDocID(doc.ID); err != nil {
+			return count, fmt.Errorf("documents[%d] has invalid id: %w", i, err)
 		}
 		c.docs[doc.ID] = doc
 		if err := c.writeDocument(doc); err != nil {

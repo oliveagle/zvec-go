@@ -9,6 +9,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -91,15 +92,21 @@ func (c *Config) fillDefaults() {
 }
 
 // LoadConfig reads and parses the JSON configuration at path, applying
-// defaults for any unset fields.
+// defaults for any unset fields. The parse is strict: trailing data after the
+// JSON document is rejected, so a corrupted or concatenated file cannot be
+// silently accepted.
 func LoadConfig(path string) (*Config, error) {
 	cfg := DefaultConfig()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read config %q: %w", path, err)
 	}
-	if err := json.Unmarshal(data, cfg); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if err := dec.Decode(cfg); err != nil {
 		return nil, fmt.Errorf("parse config %q: %w", path, err)
+	}
+	if dec.More() {
+		return nil, fmt.Errorf("parse config %q: trailing data after JSON document", path)
 	}
 	cfg.fillDefaults()
 	return cfg, nil

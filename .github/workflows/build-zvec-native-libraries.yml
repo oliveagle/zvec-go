@@ -41,7 +41,11 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
-          TAG=$(cd zvec && git describe --tags --exact-match HEAD) || {
+          # actions/checkout fetches the submodule shallow (no tag refs),
+          # so fetch the upstream tags first; the pin must sit exactly on
+          # a release tag for release-asset lookup to work.
+          git -C zvec fetch origin --tags --no-write-fetch-head
+          TAG=$(git -C zvec describe --tags --exact-match HEAD) || {
             echo "::error::zvec submodule commit is not exactly on a release tag; cannot map it to a release SDK"
             exit 1
           }
@@ -85,7 +89,11 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
-          TAG=$(cd zvec && git describe --tags --exact-match HEAD) || {
+          # actions/checkout fetches the submodule shallow (no tag refs),
+          # so fetch the upstream tags first; the pin must sit exactly on
+          # a release tag for release-asset lookup to work.
+          git -C zvec fetch origin --tags --no-write-fetch-head
+          TAG=$(git -C zvec describe --tags --exact-match HEAD) || {
             echo "::error::zvec submodule commit is not exactly on a release tag; cannot map it to a release SDK"
             exit 1
           }
@@ -129,7 +137,11 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
-          TAG=$(cd zvec && git describe --tags --exact-match HEAD) || {
+          # actions/checkout fetches the submodule shallow (no tag refs),
+          # so fetch the upstream tags first; the pin must sit exactly on
+          # a release tag for release-asset lookup to work.
+          git -C zvec fetch origin --tags --no-write-fetch-head
+          TAG=$(git -C zvec describe --tags --exact-match HEAD) || {
             echo "::error::zvec submodule commit is not exactly on a release tag; cannot map it to a release SDK"
             exit 1
           }
@@ -182,7 +194,8 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
-          TAG=$(cd zvec && git describe --tags --exact-match HEAD) || {
+          git -C zvec fetch origin --tags --no-write-fetch-head || true
+          TAG=$(git -C zvec describe --tags --exact-match HEAD) || {
             echo "::warning::zvec submodule commit is not exactly on a release tag; skipping jieba refresh"
             echo "tag=" >> "$GITHUB_OUTPUT"
             exit 0

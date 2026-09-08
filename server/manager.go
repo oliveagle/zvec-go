@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,20 +29,25 @@ func ValidateCollectionName(name string) bool {
 type CollectionManager struct {
 	mu      sync.RWMutex
 	dataDir string
+	log     *slog.Logger
 	colls   map[string]*zvec.Collection
 }
 
 // NewCollectionManager creates a manager rooted at dataDir and ensures the
-// directory exists.
-func NewCollectionManager(dataDir string) (*CollectionManager, error) {
+// directory exists. log may be nil.
+func NewCollectionManager(dataDir string, log *slog.Logger) (*CollectionManager, error) {
 	if dataDir == "" {
 		dataDir = "./data"
+	}
+	if log == nil {
+		log = slog.Default()
 	}
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir %q: %w", dataDir, err)
 	}
 	return &CollectionManager{
 		dataDir: dataDir,
+		log:     log,
 		colls:   make(map[string]*zvec.Collection),
 	}, nil
 }
@@ -72,7 +78,10 @@ func (m *CollectionManager) OpenExisting() error {
 		}
 		coll, err := zvec.Open(filepath.Join(m.dataDir, name), nil)
 		if err != nil {
-			continue // skip unreadable collections rather than fail startup
+			// Skip unreadable collections rather than fail startup, but make
+			// it visible: otherwise the collection simply 404s with no trace.
+			m.log.Warn("skipping collection at startup", "name", name, "err", err)
+			continue
 		}
 		m.colls[name] = coll
 	}

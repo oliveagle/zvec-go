@@ -179,10 +179,6 @@ func (z *Zvec) Open(path string, option *CollectionOption) (*Collection, error) 
 		return nil, fmt.Errorf("zvec not initialized")
 	}
 
-	if option == nil {
-		option = DefaultCollectionOption()
-	}
-
 	// Check if collection exists
 	metaPath := filepath.Join(path, "collection.json")
 	if _, err := os.Stat(metaPath); os.IsNotExist(err) {
@@ -202,6 +198,16 @@ func (z *Zvec) Open(path string, option *CollectionOption) (*Collection, error) 
 	}
 	if err := json.Unmarshal(metaBytes, &metaData); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+
+	// A caller-supplied option wins; otherwise restore the option that was
+	// persisted with the collection (e.g. read-only) at creation time.
+	if option == nil {
+		if metaData.Option != nil {
+			option = metaData.Option
+		} else {
+			option = DefaultCollectionOption()
+		}
 	}
 
 	coll := &Collection{

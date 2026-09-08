@@ -40,15 +40,27 @@ func (s *CollectionSchema) Validate() error {
 		return fmt.Errorf("collection name cannot be empty")
 	}
 
-	// Check for duplicate field names
+	// Check for duplicate field names and validate each field.
 	fieldNames := make(map[string]bool)
 	for _, f := range s.Fields {
+		if f == nil {
+			return fmt.Errorf("nil field in schema")
+		}
+		if err := f.Validate(); err != nil {
+			return err
+		}
 		if fieldNames[f.Name] {
 			return fmt.Errorf("duplicate field name: %s", f.Name)
 		}
 		fieldNames[f.Name] = true
 	}
 	for _, f := range s.VectorFields {
+		if f == nil {
+			return fmt.Errorf("nil vector field in schema")
+		}
+		if err := f.Validate(); err != nil {
+			return err
+		}
 		if fieldNames[f.Name] {
 			return fmt.Errorf("duplicate field name: %s", f.Name)
 		}
