@@ -142,9 +142,12 @@ func (c *Collection) InsertBatch(docs []*Document) (int, error) {
 	}
 
 	count := 0
-	for _, doc := range docs {
-		if doc == nil || ValidateDocID(doc.ID) != nil {
-			continue
+	for i, doc := range docs {
+		if doc == nil {
+			return count, fmt.Errorf("documents[%d] is nil", i)
+		}
+		if err := ValidateDocID(doc.ID); err != nil {
+			return count, fmt.Errorf("documents[%d] has invalid id: %w", i, err)
 		}
 		c.docs[doc.ID] = doc
 		if err := c.writeDocument(doc); err != nil {
@@ -340,6 +343,30 @@ func ValidateDocID(id string) error {
 
 // Internal helper methods
 
+// writeFileAtomic writes data to path by writing a temp file in the same
+// directory and renaming it over path, so a crash mid-write can never leave a
+// truncated/corrupt file behind (readers would otherwise skip or misparse it).
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after successful rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
 func (c *Collection) docPath(id string) string {
 	return filepath.Join(c.path, "docs", id+".json")
 }
@@ -349,17 +376,12 @@ func (c *Collection) writeDocument(doc *Document) error {
 		return err
 	}
 
-	docsDir := filepath.Join(c.path, "docs")
-	if err := os.MkdirAll(docsDir, 0755); err != nil {
-		return err
-	}
-
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(c.docPath(doc.ID), data, 0644)
+	return writeFileAtomic(c.docPath(doc.ID), data)
 }
 
 func (c *Collection) readDocument(id string) (*Document, error) {
@@ -400,7 +422,7 @@ func (c *Collection) persistSchema() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(metaPath, data, 0644)
+	return writeFileAtomic(metaPath, data)
 }
 
 // loadDocs populates the in-memory document map from disk so that queries,
