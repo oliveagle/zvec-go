@@ -27,6 +27,7 @@ zvec-go ships two independent pieces:
 │   └── web/index.html                            # embedded web console
 ├── cmd/zvec-httpd/                               # the runnable service binary
 ├── cgo/                                          # optional experimental CGO binding
+├── scripts/ensure-zvec-gomod.sh                  # recreates the nested zvec/go.mod after fresh clones
 ├── config.example.json                           # sample service config
 ├── lib/                                          # prebuilt zvec C API shared libraries + FTS data
 └── zvec/                                         # alibaba/zvec C++ submodule
