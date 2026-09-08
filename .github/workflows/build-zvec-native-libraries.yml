@@ -234,7 +234,9 @@ jobs:
           curl -sSL -o /tmp/zvec-sdk.tar.gz \
             "https://github.com/${{ env.ZVEC_REPO }}/releases/download/${{ steps.ver.outputs.tag }}/zvec-sdk-linux-amd64.tar.gz"
           mkdir -p /tmp/sdk
-          tar xzf /tmp/zvec-sdk.tar.gz -C /tmp/sdk data/jieba_dict
+          # The archive stores members with a ./ prefix, so select-by-name
+          # does not work; extract everything (same as the fetch jobs).
+          tar xzf /tmp/zvec-sdk.tar.gz -C /tmp/sdk
           mkdir -p lib/data/jieba_dict
           cp /tmp/sdk/data/jieba_dict/jieba.dict.utf8 lib/data/jieba_dict/
           cp /tmp/sdk/data/jieba_dict/hmm_model.utf8 lib/data/jieba_dict/
