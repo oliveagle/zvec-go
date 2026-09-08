@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -22,11 +23,19 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
-// decodeBody decodes a JSON request body of bounded size into dst.
+// decodeBody decodes a JSON request body of bounded size into dst. It
+// rejects bodies with trailing data after the JSON document (e.g.
+// '{"a":1}GARBAGE'), which the bare Decoder would silently accept.
 func decodeBody(r *http.Request, dst interface{}) error {
 	r.Body = http.MaxBytesReader(nil, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
-	return dec.Decode(dst)
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	if dec.More() {
+		return fmt.Errorf("invalid JSON: trailing data after document")
+	}
+	return nil
 }
 
 // getCollection resolves the {name} path parameter to an open collection.
@@ -197,19 +206,19 @@ func (s *Server) handleUpsertDocuments(w http.ResponseWriter, r *http.Request) {
 
 	docs := make([]*zvec.Document, 0, len(req.Documents)+1)
 	if req.Document != nil {
+		if err := zvec.ValidateDocID(req.Document.ID); err != nil {
+			writeError(w, http.StatusBadRequest, "document has invalid id: "+err.Error())
+			return
+		}
 		docs = append(docs, toDocument(req.Document))
 	}
 	for i := range req.Documents {
 		d := toDocument(&req.Documents[i])
-		if d.ID == "" {
-			writeError(w, http.StatusBadRequest, "documents["+strconv.Itoa(i)+"] is missing id")
+		if err := zvec.ValidateDocID(d.ID); err != nil {
+			writeError(w, http.StatusBadRequest, "documents["+strconv.Itoa(i)+"] has invalid id: "+err.Error())
 			return
 		}
 		docs = append(docs, d)
-	}
-	if req.Document != nil && req.Document.ID == "" {
-		writeError(w, http.StatusBadRequest, "document is missing id")
-		return
 	}
 	if len(docs) == 0 {
 		writeError(w, http.StatusBadRequest, "provide either 'document' or 'documents'")
@@ -231,6 +240,10 @@ func (s *Server) handleGetDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	if err := zvec.ValidateDocID(id); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid document id")
+		return
+	}
 	doc, err := c.Get(id)
 	if err != nil || doc == nil {
 		writeError(w, http.StatusNotFound, "document not found: "+id)
@@ -249,7 +262,15 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	if err := zvec.ValidateDocID(id); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid document id")
+		return
+	}
 	if err := c.Delete(id); err != nil {
+		if errors.Is(err, zvec.ErrDocNotFound) {
+			writeError(w, http.StatusNotFound, "document not found: "+id)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

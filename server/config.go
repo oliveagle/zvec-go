@@ -17,10 +17,10 @@ import (
 
 // ServerConfig holds HTTP server settings.
 type ServerConfig struct {
-	Addr                 string `json:"addr"`
-	ReadTimeoutSeconds   int    `json:"read_timeout_seconds"`
-	WriteTimeoutSeconds  int    `json:"write_timeout_seconds"`
-	ShutdownTimeoutSeconds int  `json:"shutdown_timeout_seconds"`
+	Addr                   string `json:"addr"`
+	ReadTimeoutSeconds     int    `json:"read_timeout_seconds"`
+	WriteTimeoutSeconds    int    `json:"write_timeout_seconds"`
+	ShutdownTimeoutSeconds int    `json:"shutdown_timeout_seconds"`
 }
 
 // StorageConfig holds where collections are persisted on disk.

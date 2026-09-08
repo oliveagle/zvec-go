@@ -28,7 +28,7 @@ zvec-go ships two independent pieces:
 ├── cmd/zvec-httpd/                               # the runnable service binary
 ├── cgo/                                          # optional experimental CGO binding
 ├── config.example.json                           # sample service config
-├── lib/                                          # prebuilt zvec C++ static libraries
+├── lib/                                          # prebuilt zvec C API shared libraries + FTS data
 └── zvec/                                         # alibaba/zvec C++ submodule
 ```
 
@@ -64,7 +64,10 @@ re-opened transparently by `zvec.Open`, so data survives restarts.
 ### Configuration
 
 The service is configured by a **JSON file**. Copy `config.example.json` to
-`config.json` and edit it:
+`config.json` and edit it. **Do not use the example credentials in
+`config.example.json` in production** — the `admin`/`viewer` passwords below are
+fixed, publicly documented example values (their sha256 hashes appear in this
+README); replace them with your own before exposing the service:
 
 ```json
 {
@@ -179,26 +182,34 @@ go vet   ./...
 > **Note on the `zvec/` C++ submodule:** `zvec/` is the [alibaba/zvec](https://github.com/alibaba/zvec)
 > C++ project (currently pinned to **v0.7.0**). It is a separate Go module boundary
 > (`zvec/go.mod`) so the parent `./...` build does not descend into its vendored
-> third-party Go sources. If you re-clone the submodule and a nested `go.mod` is
-> missing, all the targets above still build; only a full `go build ./...` from the
-> root needs `zvec/go.mod` present.
+> third-party Go sources (antlr, arrow, protobuf, thrift). The upstream project
+> never committed that `go.mod`, so after a fresh `git submodule update --init`
+> run `scripts/ensure-zvec-gomod.sh` to recreate it; without it, a root-level
+> `go build ./...` fails (individual targets like `./server` still build fine).
 
 ## 4. zvec C++ core & the experimental CGO binding
 
 - The zvec C++ submodule is pinned to **v0.7.0**.
-- Prebuilt static libraries live in `lib/` (see `lib/README.md`). They are rebuilt and
-  committed automatically by the `build-zvec-static-libraries` GitHub Actions workflow
-  whenever the submodule or workflow changes.
-- The `cgo/` package is an **optional, experimental** binding to the C++ core. It is
-  excluded from normal builds. To build it against the C++ core:
+- The binding links against the official, self-contained **zvec C API shared
+  libraries** checked into `lib/` (see `lib/README.md`):
+  `lib/linux-x86_64/libzvec_c_api.so`, `lib/linux-arm64/libzvec_c_api.so`,
+  `lib/macos-arm64/libzvec_c_api.dylib`. Each embeds the whole C++ core plus
+  all third-party dependencies, so the result has no runtime dependencies
+  beyond system libraries. They are refreshed and committed automatically by
+  the `build-zvec-native-libraries` GitHub Actions workflow whenever the
+  submodule or the workflow changes.
+- The `cgo/` package (import name `cgoz`) is an **optional, experimental**
+  binding to the C++ core. It is excluded from normal builds (build-tag gated).
+  It exposes Schema / Document / Query / Collection types with
+  create-open-upsert-query-delete operations and automatic finalizers:
 
   ```bash
-  CGO_ENABLED=1 go build -tags cgo,zvec_cgo ./cgo/
+  CGO_ENABLED=1 go build -tags 'cgo zvec_cgo' ./cgo/
+  CGO_ENABLED=1 go test -tags 'cgo zvec_cgo' -v ./cgo/
   ```
 
-  It requires the prebuilt static libraries in `lib/` that match the pinned zvec version.
-  The binding currently exposes a small linkage-probing surface; the full
-  Collection/Doc/Query surface is a follow-up.
+  The libraries in `lib/` must match the pinned zvec version; the full
+  provenance and update procedure are documented in `lib/README.md`.
 
 ## License
 

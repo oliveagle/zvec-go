@@ -1,122 +1,83 @@
-# macOS 编译说明
+# macOS 编译说明（CGO 绑定）
 
-## 使用 GitHub Actions (推荐)
+> 说明：当前版本不再从源码编译静态库，而是直接使用 alibaba/zvec 官方
+> release 提供的**自包含 C API 动态库**（`libzvec_c_api.dylib`），
+> 里面已经包含完整的 C++ 核心和全部第三方依赖。macOS 上**无需 CMake、
+> 无需编译 zvec 源码**。
 
-最简单的方式是通过 GitHub Actions 自动编译:
-
-1. 推送代码到 main 分支
-2. 或手动在 GitHub Actions 中触发 "Build zvec Static Libraries"
-3. 编译完成后会自动提交到 lib/ 目录
-
-## 本地编译
-
-### 前置条件
-
-```bash
-# 安装 CMake
-brew install cmake
-```
-
-### 编译步骤
-
-```bash
-# 1. 初始化子模块 (首次需要，耗时较长)
-git submodule update --init --recursive
-
-# 2. 运行构建脚本
-./build-macos.sh
-```
-
-### 手动编译
-
-如果构建脚本失败，可以手动编译:
-
-```bash
-# 1. 进入 zvec 目录
-cd zvec
-
-# 2. 创建构建目录
-mkdir -p build && cd build
-
-# 3. 配置 CMake (Apple Silicon)
-cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-      -DCMAKE_OSX_ARCHITECTURES=arm64 \
-      ..
-
-# 对于 Intel Mac，使用:
-# cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-#       -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-#       ..
-
-# 4. 编译
-make -j$(sysctl -n hw.ncpu)
-
-# 5. 复制库文件到 lib/ 目录
-cp lib/libzvec_core.a ../../lib/libzvec_core-macos-arm64.a
-cp lib/libzvec_ailego.a ../../lib/libzvec_ailego-macos-arm64.a
-```
-
-## 库文件命名
-
-编译完成后，lib/ 目录应该包含:
+## 目录结构
 
 ```
 lib/
-├── libzvec_core-linux-x86_64.a     # Linux x86_64
-├── libzvec_ailego-linux-x86_64.a   # Linux x86_64
-├── libzvec_core-macos-arm64.a      # macOS Apple Silicon
-├── libzvec_ailego-macos-arm64.a    # macOS Apple Silicon
-├── libzvec_core-macos-x86_64.a     # macOS Intel (可选)
-└── libzvec_ailego-macos-x86_64.a   # macOS Intel (可选)
+├── linux-x86_64/libzvec_c_api.so     # Linux x86_64
+├── linux-arm64/libzvec_c_api.so      # Linux ARM64
+├── macos-arm64/libzvec_c_api.dylib   # macOS Apple Silicon
+└── data/jieba_dict/                  # FTS 分词数据（jieba）
+    ├── jieba.dict.utf8
+    └── hmm_model.utf8
 ```
 
-## 验证编译
+文件名必须保持 `libzvec_c_api.{so,dylib}`（与 SONAME 一致），
+cgo 链接规则直接链接该文件并把 rpath 指到所在子目录，
+运行时无需设置 `DYLD_LIBRARY_PATH`。
+
+## 使用 / 验证（本地）
 
 ```bash
-# 检查库文件架构
-file lib/libzvec_core-macos-*.a
+# 构建 CGO 绑定（需要 clang，macOS 自带）
+CGO_ENABLED=1 go build -tags 'cgo zvec_cgo' ./cgo/
 
-# 应该显示:
-# libzvec_core-macos-arm64.a: Mach-O 64-bit arm64
-# libzvec_core-macos-x86_64.a: Mach-O 64-bit x86_64
+# 运行 CGO 测试
+CGO_ENABLED=1 go test -tags 'cgo zvec_cgo' -v ./cgo/
 ```
 
-## 使用 Go 测试
+检查 dylib 架构：
 
 ```bash
-# 测试 CGO 链接
-go build ./...
-
-# 运行测试
-go test ./...
+file lib/macos-arm64/libzvec_c_api.dylib
+# 应显示: Mach-O 64-bit arm64 dynamically linked shared library
 ```
+
+## 更新库文件（跟随 zvec 子模块版本）
+
+当前仓库把 zvec 子模块固定到某个版本（目前 **v0.7.0**）。
+当子模块升级到新版本时，需要下载对应 release 的预编译 SDK：
+
+1. 确认固定版本：
+   ```bash
+   cd zvec && git describe --tags --exact-match HEAD
+   ```
+2. 从 `https://github.com/alibaba/zvec/releases` 下载对应 tag 的
+   `zvec-sdk-osx-arm64.tar.gz`（Apple Silicon）。
+3. 解压后把 `libzvec_c_api.dylib` 放到
+   `lib/macos-arm64/libzvec_c_api.dylib`（如 FTS 数据有更新，
+   同步 `lib/data/jieba_dict/`）。
+4. 运行上面的 CGO 测试验证后提交。
+
+仓库中的
+[`build-zvec-native-libraries.yml`](../.github/workflows/build-zvec-native-libraries.yml)
+GitHub Actions 工作流会自动完成上述步骤（下载预编译 SDK → 提交到
+`lib/`），当 `zvec/` 子模块或工作流文件变化时自动触发。
 
 ## 故障排除
 
-### 问题：CMake 版本太低
+### 链接错误：找不到 `libzvec_c_api`
+
+确认 `lib/macos-arm64/libzvec_c_api.dylib` 存在，且文件名没有
+平台后缀：
 
 ```bash
-brew upgrade cmake
+ls lib/macos-arm64/
+grep -A 3 "#cgo darwin" cgo/collection_cgo.go
 ```
 
-### 问题：子模块初始化失败
+### 运行时报 dyld 加载失败
+
+cgo 已经把 rpath 写进了产物；若仍失败，可临时设置
+`DYLD_LIBRARY_PATH=$(pwd)/lib/macos-arm64` 排查。
+
+### 使用了 FTS 时提示找不到 jieba 词典
 
 ```bash
-# 尝试使用更浅的克隆深度
-git submodule update --init --recursive --depth 1
-```
-
-### 问题：编译时找不到头文件
-
-确保子模块已正确初始化:
-```bash
-ls zvec/src/include
-```
-
-### 问题：链接错误
-
-确保库文件命名正确，并且 CGO 配置正确:
-```bash
-# 检查 cgo/collection_cgo.go 中的链接配置
-grep -A 5 "#cgo darwin" cgo/collection_cgo.go
+export ZVEC_JIEBA_DICT_DIR=$(pwd)/lib/data/jieba_dict
 ```

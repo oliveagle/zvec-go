@@ -1,0 +1,262 @@
+name: Build zvec Native Libraries
+
+# Refreshes the prebuilt zvec C API shared libraries checked in under lib/
+# to match the version the zvec submodule is pinned to. Instead of building
+# the C++ core from source, this downloads the official prebuilt SDK assets
+# (zvec-sdk-<platform>.tar.gz) of the matching alibaba/zvec release, keeps
+# only libzvec_c_api.{so,dylib} plus the jieba FTS data, smoke-tests the
+# CGO binding on Linux, and commits the result back to the repo.
+#
+# Triggered automatically on push to main when the zvec/ submodule pin or
+# this workflow changes, and manually via "Run workflow".
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'zvec/**'
+      - '.github/workflows/build-zvec-native-libraries.yml'
+
+env:
+  ZVEC_REPO: alibaba/zvec
+
+jobs:
+  # ------------------------------------------------------------------
+  # One job per platform: download the prebuilt SDK of the pinned zvec
+  # release and stage the C API library under lib/<subdir>/.
+  # ------------------------------------------------------------------
+
+  fetch-linux-x86_64:
+    name: Fetch Linux x86_64
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code (with zvec submodule, to read the pinned tag)
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Resolve pinned zvec version
+        id: ver
+        run: |
+          set -euo pipefail
+          TAG=$(cd zvec && git describe --tags --exact-match HEAD) || {
+            echo "::error::zvec submodule commit is not exactly on a release tag; cannot map it to a release SDK"
+            exit 1
+          }
+          echo "zvec pin: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download prebuilt SDK
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/zvec-sdk.tar.gz \
+            "https://github.com/${{ env.ZVEC_REPO }}/releases/download/${{ steps.ver.outputs.tag }}/zvec-sdk-linux-amd64.tar.gz"
+          mkdir -p /tmp/sdk
+          tar xzf /tmp/zvec-sdk.tar.gz -C /tmp/sdk
+          test -f /tmp/sdk/lib/libzvec_c_api.so
+
+      - name: Stage library
+        run: |
+          set -euo pipefail
+          mkdir -p lib/linux-x86_64
+          cp /tmp/sdk/lib/libzvec_c_api.so lib/linux-x86_64/
+          chmod 755 lib/linux-x86_64/libzvec_c_api.so
+          file lib/linux-x86_64/libzvec_c_api.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: lib/linux-x86_64/
+
+  fetch-linux-arm64:
+    name: Fetch Linux ARM64
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code (with zvec submodule, to read the pinned tag)
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Resolve pinned zvec version
+        id: ver
+        run: |
+          set -euo pipefail
+          TAG=$(cd zvec && git describe --tags --exact-match HEAD) || {
+            echo "::error::zvec submodule commit is not exactly on a release tag; cannot map it to a release SDK"
+            exit 1
+          }
+          echo "zvec pin: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download prebuilt SDK
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/zvec-sdk.tar.gz \
+            "https://github.com/${{ env.ZVEC_REPO }}/releases/download/${{ steps.ver.outputs.tag }}/zvec-sdk-linux-arm64.tar.gz"
+          mkdir -p /tmp/sdk
+          tar xzf /tmp/zvec-sdk.tar.gz -C /tmp/sdk
+          test -f /tmp/sdk/lib/libzvec_c_api.so
+
+      - name: Stage library
+        run: |
+          set -euo pipefail
+          mkdir -p lib/linux-arm64
+          cp /tmp/sdk/lib/libzvec_c_api.so lib/linux-arm64/
+          chmod 755 lib/linux-arm64/libzvec_c_api.so
+          file lib/linux-arm64/libzvec_c_api.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-arm64
+          path: lib/linux-arm64/
+
+  fetch-macos-arm64:
+    name: Fetch macOS ARM64
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code (with zvec submodule, to read the pinned tag)
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Resolve pinned zvec version
+        id: ver
+        run: |
+          set -euo pipefail
+          TAG=$(cd zvec && git describe --tags --exact-match HEAD) || {
+            echo "::error::zvec submodule commit is not exactly on a release tag; cannot map it to a release SDK"
+            exit 1
+          }
+          echo "zvec pin: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download prebuilt SDK
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/zvec-sdk.tar.gz \
+            "https://github.com/${{ env.ZVEC_REPO }}/releases/download/${{ steps.ver.outputs.tag }}/zvec-sdk-osx-arm64.tar.gz"
+          mkdir -p /tmp/sdk
+          tar xzf /tmp/zvec-sdk.tar.gz -C /tmp/sdk
+          test -f /tmp/sdk/lib/libzvec_c_api.dylib
+
+      - name: Stage library
+        run: |
+          set -euo pipefail
+          mkdir -p lib/macos-arm64
+          cp /tmp/sdk/lib/libzvec_c_api.dylib lib/macos-arm64/
+          chmod 755 lib/macos-arm64/libzvec_c_api.dylib
+          file lib/macos-arm64/libzvec_c_api.dylib
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: lib/macos-arm64/
+
+  # ------------------------------------------------------------------
+  # Assemble lib/ (libraries + FTS data), smoke-test the CGO binding on
+  # Linux, and commit the result back to the repo.
+  # ------------------------------------------------------------------
+  commit-libraries:
+    name: Commit libraries to repo
+    needs: [fetch-linux-x86_64, fetch-linux-arm64, fetch-macos-arm64]
+    # always(): a single platform failure must not block committing the
+    # ones that succeeded; missing artifacts are skipped below.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code (with zvec submodule, to read the pinned tag)
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve pinned zvec version
+        id: ver
+        run: |
+          set -euo pipefail
+          TAG=$(cd zvec && git describe --tags --exact-match HEAD) || {
+            echo "::warning::zvec submodule commit is not exactly on a release tag; skipping jieba refresh"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          echo "zvec pin: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Download artifacts (best-effort per platform)
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-x86_64
+          path: lib/linux-x86_64
+
+      - name: Download artifacts (best-effort per platform)
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64
+          path: lib/linux-arm64
+
+      - name: Download artifacts (best-effort per platform)
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64
+          path: lib/macos-arm64
+
+      - name: Refresh FTS (jieba) data
+        if: steps.ver.outputs.tag != ''
+        run: |
+          set -euo pipefail
+          curl -sSL -o /tmp/zvec-sdk.tar.gz \
+            "https://github.com/${{ env.ZVEC_REPO }}/releases/download/${{ steps.ver.outputs.tag }}/zvec-sdk-linux-amd64.tar.gz"
+          mkdir -p /tmp/sdk
+          tar xzf /tmp/zvec-sdk.tar.gz -C /tmp/sdk data/jieba_dict
+          mkdir -p lib/data/jieba_dict
+          cp /tmp/sdk/data/jieba_dict/jieba.dict.utf8 lib/data/jieba_dict/
+          cp /tmp/sdk/data/jieba_dict/hmm_model.utf8 lib/data/jieba_dict/
+
+      - name: Setup Go
+        if: steps.ver.outputs.tag != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Smoke-test the CGO binding (linux-x86_64)
+        if: steps.ver.outputs.tag != ''
+        run: |
+          set -euo pipefail
+          if [ ! -f lib/linux-x86_64/libzvec_c_api.so ]; then
+            echo "no linux-x86_64 library staged; skipping smoke test"
+            exit 0
+          fi
+          go version
+          CGO_ENABLED=1 go test -tags 'cgo zvec_cgo' -count=1 -timeout 300s ./cgo/
+
+      - name: Configure git
+        run: |
+          git config user.email "oliveagle@gmail.com"
+          git config user.name "oliveagle"
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git add lib/
+          if ! git diff --staged --quiet; then
+            TAG=${{ steps.ver.outputs.tag }}
+            [ -n "$TAG" ] || TAG=$(cd zvec && git rev-parse --short HEAD)
+            git commit -m "Update prebuilt zvec C API libraries (zvec ${TAG})"
+            git push
+          else
+            echo "No changes to commit"
+          fi

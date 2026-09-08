@@ -8,12 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // Zvec is the main client for zvec operations.
 type Zvec struct {
-	mu       sync.RWMutex
-	config   *Config
+	mu          sync.RWMutex
+	config      *Config
 	initialized bool
 }
 
@@ -24,28 +25,28 @@ var (
 
 // Config holds zvec initialization configuration.
 type Config struct {
-	LogType                 LogType   `json:"log_type,omitempty"`
-	LogLevel                LogLevel  `json:"log_level,omitempty"`
-	LogDir                  string    `json:"log_dir,omitempty"`
-	LogBasename             string    `json:"log_basename,omitempty"`
-	LogFileSize             int       `json:"log_file_size,omitempty"` // MB
-	LogOverdueDays          int       `json:"log_overdue_days,omitempty"`
-	QueryThreads            int       `json:"query_threads,omitempty"`
-	OptimizeThreads         int       `json:"optimize_threads,omitempty"`
+	LogType                  LogType  `json:"log_type,omitempty"`
+	LogLevel                 LogLevel `json:"log_level,omitempty"`
+	LogDir                   string   `json:"log_dir,omitempty"`
+	LogBasename              string   `json:"log_basename,omitempty"`
+	LogFileSize              int      `json:"log_file_size,omitempty"` // MB
+	LogOverdueDays           int      `json:"log_overdue_days,omitempty"`
+	QueryThreads             int      `json:"query_threads,omitempty"`
+	OptimizeThreads          int      `json:"optimize_threads,omitempty"`
 	InvertToForwardScanRatio float64  `json:"invert_to_forward_scan_ratio,omitempty"`
-	BruteForceByKeysRatio   float64   `json:"brute_force_by_keys_ratio,omitempty"`
-	MemoryLimitMB           int       `json:"memory_limit_mb,omitempty"`
+	BruteForceByKeysRatio    float64  `json:"brute_force_by_keys_ratio,omitempty"`
+	MemoryLimitMB            int      `json:"memory_limit_mb,omitempty"`
 }
 
 // DefaultConfig returns a default configuration.
 func DefaultConfig() *Config {
 	return &Config{
-		LogType:                 LogTypeConsole,
-		LogLevel:                LogLevelWarn,
-		LogDir:                  "./logs",
-		LogBasename:             "zvec.log",
-		LogFileSize:             2048,
-		LogOverdueDays:          7,
+		LogType:        LogTypeConsole,
+		LogLevel:       LogLevelWarn,
+		LogDir:         "./logs",
+		LogBasename:    "zvec.log",
+		LogFileSize:    2048,
+		LogOverdueDays: 7,
 	}
 }
 
@@ -59,7 +60,7 @@ func Init(cfg *Config) error {
 		}
 
 		globalZvec = &Zvec{
-			config: cfg,
+			config:      cfg,
 			initialized: true,
 		}
 
@@ -147,10 +148,10 @@ func (z *Zvec) CreateAndOpen(path string, schema *CollectionSchema, option *Coll
 	// For now, create a metadata file to simulate creation
 	metaPath := filepath.Join(path, "collection.json")
 	metaData := map[string]interface{}{
-		"name":      schema.Name,
-		"schema":    schema,
-		"option":    option,
-		"created_at": "now",
+		"name":       schema.Name,
+		"schema":     schema,
+		"option":     option,
+		"created_at": time.Now().Format(time.RFC3339),
 	}
 	metaBytes, err := json.MarshalIndent(metaData, "", "  ")
 	if err != nil {

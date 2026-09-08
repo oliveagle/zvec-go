@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Collection represents an open zvec collection.
@@ -120,6 +121,9 @@ func (c *Collection) Insert(doc *Document) error {
 	if doc.ID == "" {
 		return fmt.Errorf("document ID cannot be empty")
 	}
+	if err := ValidateDocID(doc.ID); err != nil {
+		return err
+	}
 
 	// TODO: Validate against schema
 	c.docs[doc.ID] = doc
@@ -139,7 +143,7 @@ func (c *Collection) InsertBatch(docs []*Document) (int, error) {
 
 	count := 0
 	for _, doc := range docs {
-		if doc == nil || doc.ID == "" {
+		if doc == nil || ValidateDocID(doc.ID) != nil {
 			continue
 		}
 		c.docs[doc.ID] = doc
@@ -158,6 +162,10 @@ func (c *Collection) Get(id string) (*Document, error) {
 
 	if c.closed {
 		return nil, fmt.Errorf("collection is closed")
+	}
+
+	if err := ValidateDocID(id); err != nil {
+		return nil, err
 	}
 
 	doc, ok := c.docs[id]
@@ -182,6 +190,16 @@ func (c *Collection) Delete(id string) error {
 		return fmt.Errorf("collection is closed")
 	}
 
+	if err := ValidateDocID(id); err != nil {
+		return err
+	}
+
+	if _, ok := c.docs[id]; !ok {
+		// Not in memory; check the on-disk representation before deciding.
+		if _, err := os.Stat(c.docPath(id)); err != nil {
+			return fmt.Errorf("document not found: %s: %w", id, ErrDocNotFound)
+		}
+	}
 	delete(c.docs, id)
 	return c.deleteDocument(id)
 }
@@ -198,6 +216,9 @@ func (c *Collection) Update(doc *Document) error {
 	if doc == nil || doc.ID == "" {
 		return fmt.Errorf("invalid document")
 	}
+	if err := ValidateDocID(doc.ID); err != nil {
+		return err
+	}
 
 	c.docs[doc.ID] = doc
 	return c.writeDocument(doc)
@@ -205,8 +226,8 @@ func (c *Collection) Update(doc *Document) error {
 
 // SearchResult represents a single search result.
 type SearchResult struct {
-	ID       string  `json:"id"`
-	Score    float64 `json:"score"`
+	ID       string    `json:"id"`
+	Score    float64   `json:"score"`
 	Document *Document `json:"document,omitempty"`
 }
 
@@ -294,6 +315,29 @@ func (c *Collection) ListIDs() ([]string, error) {
 	return ids, nil
 }
 
+// ValidateDocID reports whether id is a safe document identifier. IDs must be
+// non-empty and must not contain path separators, absolute paths, or dot-dot
+// segments that could escape the collection's docs directory (path traversal).
+func ValidateDocID(id string) error {
+	if id == "" {
+		return fmt.Errorf("document ID cannot be empty")
+	}
+	if id == "." || id == ".." {
+		return fmt.Errorf("invalid document ID %q", id)
+	}
+	if strings.ContainsAny(id, `/\`) || strings.ContainsRune(id, 0) {
+		return fmt.Errorf("invalid document ID %q: must not contain path separators", id)
+	}
+	if strings.HasPrefix(id, "./") || strings.HasPrefix(id, "../") ||
+		strings.Contains(id, "/../") || strings.Contains(id, `\..\`) {
+		return fmt.Errorf("invalid document ID %q: must not contain path traversal segments", id)
+	}
+	if filepath.Base(id) != id {
+		return fmt.Errorf("invalid document ID %q", id)
+	}
+	return nil
+}
+
 // Internal helper methods
 
 func (c *Collection) docPath(id string) string {
@@ -301,6 +345,10 @@ func (c *Collection) docPath(id string) string {
 }
 
 func (c *Collection) writeDocument(doc *Document) error {
+	if err := ValidateDocID(doc.ID); err != nil {
+		return err
+	}
+
 	docsDir := filepath.Join(c.path, "docs")
 	if err := os.MkdirAll(docsDir, 0755); err != nil {
 		return err
@@ -315,6 +363,10 @@ func (c *Collection) writeDocument(doc *Document) error {
 }
 
 func (c *Collection) readDocument(id string) (*Document, error) {
+	if err := ValidateDocID(id); err != nil {
+		return nil, err
+	}
+
 	data, err := os.ReadFile(c.docPath(id))
 	if err != nil {
 		return nil, err
@@ -328,7 +380,27 @@ func (c *Collection) readDocument(id string) (*Document, error) {
 }
 
 func (c *Collection) deleteDocument(id string) error {
+	if err := ValidateDocID(id); err != nil {
+		return err
+	}
 	return os.Remove(c.docPath(id))
+}
+
+// persistSchema writes the collection metadata back to collection.json after
+// schema-modifying DDL operations so the change survives a restart.
+func (c *Collection) persistSchema() error {
+	metaPath := filepath.Join(c.path, "collection.json")
+	metaData := map[string]interface{}{
+		"name":       c.schema.Name,
+		"schema":     c.schema,
+		"option":     c.option,
+		"updated_at": time.Now().Format(time.RFC3339),
+	}
+	data, err := json.MarshalIndent(metaData, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(metaPath, data, 0644)
 }
 
 // loadDocs populates the in-memory document map from disk so that queries,
@@ -496,8 +568,8 @@ func (c *Collection) Destroy() error {
 // Flush forces all pending writes to disk.
 // Ensures durability of recent inserts/updates.
 func (c *Collection) Flush() error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	if c.closed {
 		return fmt.Errorf("collection is closed")
@@ -640,7 +712,7 @@ func (c *Collection) AddColumn(fieldSchema *FieldSchema, expression string, opti
 	// TODO: Apply expression to existing documents
 	_ = expression
 	_ = option
-	return nil
+	return c.persistSchema()
 }
 
 // DropColumn removes a column from the collection.
@@ -656,7 +728,7 @@ func (c *Collection) DropColumn(fieldName string) error {
 	for i, f := range c.schema.Fields {
 		if f.Name == fieldName {
 			c.schema.Fields = append(c.schema.Fields[:i], c.schema.Fields[i+1:]...)
-			return nil
+			return c.persistSchema()
 		}
 	}
 
@@ -684,7 +756,7 @@ func (c *Collection) AlterColumn(oldName string, newName string, fieldSchema *Fi
 				f.Nullable = fieldSchema.Nullable
 				f.IndexParam = fieldSchema.IndexParam
 			}
-			return nil
+			return c.persistSchema()
 		}
 	}
 
@@ -709,6 +781,9 @@ func (c *Collection) Upsert(doc *Document) error {
 	if doc.ID == "" {
 		return fmt.Errorf("document ID cannot be empty")
 	}
+	if err := ValidateDocID(doc.ID); err != nil {
+		return err
+	}
 
 	c.docs[doc.ID] = doc
 	return c.writeDocument(doc)
@@ -725,7 +800,7 @@ func (c *Collection) UpsertBatch(docs []*Document) (int, error) {
 
 	count := 0
 	for _, doc := range docs {
-		if doc == nil || doc.ID == "" {
+		if doc == nil || ValidateDocID(doc.ID) != nil {
 			continue
 		}
 		c.docs[doc.ID] = doc
@@ -766,8 +841,19 @@ func (c *Collection) Fetch(ids []string) (map[string]*Document, error) {
 
 	results := make(map[string]*Document)
 	for _, id := range ids {
-		doc, err := c.Get(id)
-		if err == nil && doc != nil {
+		// Validate before touching the map/disk so malformed IDs cannot be
+		// used for path traversal. Invalid IDs are treated as missing.
+		if ValidateDocID(id) != nil {
+			continue
+		}
+		// NOTE: read from c.docs directly and fall back to disk here rather
+		// than calling Get(), which would re-acquire the read lock and can
+		// deadlock when a writer is queued (sync.RWMutex is not reentrant).
+		if doc, ok := c.docs[id]; ok {
+			results[id] = doc
+			continue
+		}
+		if doc, err := c.readDocument(id); err == nil && doc != nil {
 			results[id] = doc
 		}
 	}
@@ -776,10 +862,10 @@ func (c *Collection) Fetch(ids []string) (map[string]*Document, error) {
 
 // QueryResult represents a single query result.
 type QueryResult struct {
-	ID     string            `json:"id"`
-	Score  float64           `json:"score"`
+	ID     string                 `json:"id"`
+	Score  float64                `json:"score"`
 	Fields map[string]interface{} `json:"fields,omitempty"`
-	Vector map[string][]float32 `json:"vectors,omitempty"`
+	Vector map[string][]float32   `json:"vectors,omitempty"`
 }
 
 // Query performs a vector similarity search with optional filtering and re-ranking.
@@ -793,6 +879,9 @@ func (c *Collection) Query(query *VectorQuery, topk int, filter string, includeV
 
 	if err := query.Validate(); err != nil {
 		return nil, err
+	}
+	if filter != "" {
+		return nil, fmt.Errorf("filter is not supported yet (filter=%q)", filter)
 	}
 
 	// Get query vector

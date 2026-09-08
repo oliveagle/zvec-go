@@ -15,8 +15,8 @@ type CollectionInfo struct {
 // info builds a CollectionInfo for the named open collection.
 func (m *CollectionManager) info(name string, c *zvec.Collection) *CollectionInfo {
 	out := &CollectionInfo{
-		Name:     name,
-		Schema:   c.Schema(),
+		Name:   name,
+		Schema: c.Schema(),
 	}
 	if s := c.Schema(); s != nil {
 		out.Description = s.Description
@@ -75,21 +75,15 @@ type queryRequest struct {
 	IncludeVector bool      `json:"include_vector,omitempty"`
 }
 
-// deleteDocumentsRequest is the body for bulk delete (optional; a single id can
-// also be supplied via the URL path).
-type deleteDocumentsRequest struct {
-	IDs []string `json:"ids"`
-}
-
 // queryResponse wraps vector search results.
 type queryResponse struct {
 	Results []*zvec.QueryResult `json:"results"`
-	TookMs  int64              `json:"took_ms"`
+	TookMs  int64               `json:"took_ms"`
 }
 
 // listDocumentsResponse wraps a paginated document listing.
 type listDocumentsResponse struct {
-	Total     int64           `json:"total"`
+	Total     int64            `json:"total"`
 	Documents []*zvec.Document `json:"documents"`
 }
 

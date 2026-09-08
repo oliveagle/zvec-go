@@ -1,6 +1,7 @@
 package zvec
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -655,6 +656,174 @@ func TestCollectionFetch(t *testing.T) {
 	}
 }
 
+func TestValidateDocIDRejectsTraversal(t *testing.T) {
+	// Valid IDs must pass
+	for _, id := range []string{"doc1", "a", "my-doc_1", "id.42"} {
+		if err := ValidateDocID(id); err != nil {
+			t.Errorf("ValidateDocID(%q) should pass, got %v", id, err)
+		}
+	}
+	// Malicious IDs must be rejected
+	for _, id := range []string{
+		"", ".", "..", "../pwned", "../../pwned", "a/../pwned",
+		"sub/pwned", "/abs/pwned", "nul\x00byte",
+	} {
+		if err := ValidateDocID(id); err == nil {
+			t.Errorf("ValidateDocID(%q) should be rejected", id)
+		}
+	}
+}
+
+func TestPathTraversalWriteBlocked(t *testing.T) {
+	globalZvec = nil
+	once = sync.Once{}
+
+	tmpDir, err := os.MkdirTemp("", "zvec-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := DefaultConfig()
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	schema := NewCollectionSchema("test")
+	collPath := filepath.Join(tmpDir, "coll")
+	coll, err := CreateAndOpen(collPath, schema, nil)
+	if err != nil {
+		t.Fatalf("CreateAndOpen failed: %v", err)
+	}
+	defer coll.Close()
+
+	// A document ID containing ".." must not be written outside docs/
+	for _, id := range []string{"../pwned", "../../pwned", "a/../pwned", "sub/../pwned"} {
+		doc := NewDocument(id).SetField("x", "y")
+		if err := coll.Upsert(doc); err == nil {
+			t.Errorf("ID %q was accepted (path traversal!)", id)
+		}
+	}
+
+	// Confirm no file escaped the collection directory
+	entries, _ := os.ReadDir(filepath.Join(tmpDir, "coll"))
+	for _, e := range entries {
+		if e.Name() != "collection.json" && e.Name() != "docs" {
+			t.Errorf("unexpected file outside docs/: %s", e.Name())
+		}
+	}
+	entries2, _ := os.ReadDir(filepath.Join(tmpDir, "coll", "docs"))
+	if len(entries2) != 0 {
+		t.Errorf("expected empty docs dir, got %d entries", len(entries2))
+	}
+
+	// A valid ID should still work
+	if err := coll.Upsert(NewDocument("doc1").SetField("a", "b")); err != nil {
+		t.Fatalf("valid ID rejected: %v", err)
+	}
+	if _, err := coll.Get("doc1"); err != nil {
+		t.Fatalf("valid doc lost: %v", err)
+	}
+}
+
+func TestSchemaPersistenceOnDDL(t *testing.T) {
+	globalZvec = nil
+	once = sync.Once{}
+
+	tmpDir, err := os.MkdirTemp("", "zvec-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := DefaultConfig()
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	collPath := filepath.Join(tmpDir, "coll")
+	schema := NewCollectionSchema("s")
+	schema.AddField(NewFieldSchema("a", DataTypeInt64).WithNullable(true))
+	coll, err := CreateAndOpen(collPath, schema, nil)
+	if err != nil {
+		t.Fatalf("CreateAndOpen: %v", err)
+	}
+
+	if err := coll.AddColumn(NewFieldSchema("b", DataTypeString).WithNullable(true), "", nil); err != nil {
+		t.Fatalf("AddColumn: %v", err)
+	}
+	coll.Close()
+
+	// Reopen from disk; schema should include "b"
+	reopened, err := Open(collPath, nil)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	found := false
+	for _, f := range reopened.Schema().Fields {
+		if f.Name == "b" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("AddColumn did not persist: fields=%v", reopened.Schema().Fields)
+	}
+
+	// DropColumn persists too
+	if err := reopened.DropColumn("a"); err != nil {
+		t.Fatalf("DropColumn: %v", err)
+	}
+	reopened.Close()
+	reopened, err = Open(collPath, nil)
+	if err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+	for _, f := range reopened.Schema().Fields {
+		if f.Name == "a" {
+			t.Fatal("DropColumn did not persist")
+		}
+	}
+}
+
+func TestQueryRejectsNonEmptyFilter(t *testing.T) {
+	globalZvec = nil
+	once = sync.Once{}
+
+	tmpDir, err := os.MkdirTemp("", "zvec-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := DefaultConfig()
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	collPath := filepath.Join(tmpDir, "coll")
+	schema := NewCollectionSchema("test")
+	schema.AddVectorField(NewVectorSchema("emb", DataTypeVectorFP32, 3))
+	coll, err := CreateAndOpen(collPath, schema, nil)
+	if err != nil {
+		t.Fatalf("CreateAndOpen: %v", err)
+	}
+	defer coll.Close()
+
+	if err := coll.Upsert(NewDocument("d1").SetVector("emb", []float32{1, 0, 0})); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	q := NewVectorQueryByVector("emb", []float32{1, 0, 0}).WithTopK(1)
+	// Empty filter should be allowed
+	if _, err := coll.Query(q, 1, "", false, nil); err != nil {
+		t.Fatalf("empty filter should pass: %v", err)
+	}
+	// Non-empty filter should return a clear error
+	if _, err := coll.Query(q, 1, "x > 1", false, nil); err == nil {
+		t.Fatal("non-empty filter should return an error (not silently ignored)")
+	}
+}
+
 func TestQueryExecutor(t *testing.T) {
 	globalZvec = nil
 	once = sync.Once{}
@@ -750,5 +919,55 @@ func TestListIDs(t *testing.T) {
 
 	if len(ids) != 3 {
 		t.Errorf("Expected 3 IDs, got %d", len(ids))
+	}
+}
+
+func TestDeleteMissingDocument(t *testing.T) {
+	// Reset global state
+	globalZvec = nil
+	once = sync.Once{}
+
+	tmpDir, err := os.MkdirTemp("", "zvec-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := DefaultConfig()
+	if err := Init(cfg); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	schema := NewCollectionSchema("deltest")
+	schema.AddField(NewFieldSchema("n", DataTypeInt64))
+
+	coll, err := CreateAndOpen(filepath.Join(tmpDir, "deltest"), schema, nil)
+	if err != nil {
+		t.Fatalf("CreateAndOpen failed: %v", err)
+	}
+	defer coll.Close()
+
+	doc := NewDocument("d1")
+	doc.SetField("n", int64(1))
+	if err := coll.Insert(doc); err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	// Deleting an existing doc succeeds.
+	if err := coll.Delete("d1"); err != nil {
+		t.Fatalf("Delete existing: %v", err)
+	}
+	// Deleting it again must report not found (wrapping ErrDocNotFound).
+	err = coll.Delete("d1")
+	if err == nil {
+		t.Fatal("Delete again: want not-found error, got nil")
+	}
+	if !errors.Is(err, ErrDocNotFound) {
+		t.Fatalf("Delete again: %v; want ErrDocNotFound", err)
+	}
+	// Never created either.
+	err = coll.Delete("never-existed")
+	if !errors.Is(err, ErrDocNotFound) {
+		t.Fatalf("Delete never-existed: %v; want ErrDocNotFound", err)
 	}
 }

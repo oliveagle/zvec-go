@@ -7,10 +7,10 @@ import (
 
 // CollectionSchema defines the structure of a collection.
 type CollectionSchema struct {
-	Name          string           `json:"name"`
-	Fields        []*FieldSchema   `json:"fields,omitempty"`
-	VectorFields  []*VectorSchema  `json:"vector_fields,omitempty"`
-	Description   string           `json:"description,omitempty"`
+	Name         string          `json:"name"`
+	Fields       []*FieldSchema  `json:"fields,omitempty"`
+	VectorFields []*VectorSchema `json:"vector_fields,omitempty"`
+	Description  string          `json:"description,omitempty"`
 }
 
 // NewCollectionSchema creates a new CollectionSchema.
@@ -60,9 +60,9 @@ func (s *CollectionSchema) Validate() error {
 
 // FieldSchema represents a scalar field in a collection schema.
 type FieldSchema struct {
-	Name       string           `json:"name"`
-	DataType   DataType         `json:"data_type"`
-	Nullable   bool             `json:"nullable"`
+	Name       string            `json:"name"`
+	DataType   DataType          `json:"data_type"`
+	Nullable   bool              `json:"nullable"`
 	IndexParam *InvertIndexParam `json:"index_param,omitempty"`
 }
 
@@ -100,11 +100,11 @@ func (f *FieldSchema) Validate() error {
 
 // VectorSchema represents a vector field in a collection schema.
 type VectorSchema struct {
-	Name       string                              `json:"name"`
-	DataType   DataType                            `json:"data_type"`
-	Dimension  int                                 `json:"dimension"`
-	MetricType MetricType                          `json:"metric_type,omitempty"`
-	IndexParam interface{}                         `json:"index_param,omitempty"` // HnswIndexParam, IVFIndexParam, or FlatIndexParam
+	Name       string      `json:"name"`
+	DataType   DataType    `json:"data_type"`
+	Dimension  int         `json:"dimension"`
+	MetricType MetricType  `json:"metric_type,omitempty"`
+	IndexParam interface{} `json:"index_param,omitempty"` // HnswIndexParam, IVFIndexParam, or FlatIndexParam
 }
 
 // NewVectorSchema creates a new VectorSchema.
@@ -197,8 +197,8 @@ func (h *HnswIndexParam) WithEfSearch(ef int) *HnswIndexParam {
 
 // IVFIndexParam contains parameters for IVF index.
 type IVFIndexParam struct {
-	NList   int `json:"nlist,omitempty"`
-	NProbe  int `json:"nprobe,omitempty"`
+	NList  int `json:"nlist,omitempty"`
+	NProbe int `json:"nprobe,omitempty"`
 }
 
 // NewIVFIndexParam creates a new IVFIndexParam with default values.
@@ -464,10 +464,10 @@ func (o *AlterColumnOption) WithSkipReindex(skip bool) *AlterColumnOption {
 
 // CollectionStats represents runtime statistics about a collection.
 type CollectionStats struct {
-	DocCount   int64  `json:"doc_count"`
-	SizeBytes  int64  `json:"size_bytes"`
+	DocCount    int64 `json:"doc_count"`
+	SizeBytes   int64 `json:"size_bytes"`
 	MemoryBytes int64 `json:"memory_bytes"`
-	IndexSize  int64  `json:"index_size"`
+	IndexSize   int64 `json:"index_size"`
 }
 
 // String returns a string representation of the stats.

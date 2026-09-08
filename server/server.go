@@ -16,11 +16,11 @@ const ServiceVersion = "0.1.0"
 
 // Server is a lightweight zvec HTTP service.
 type Server struct {
-	cfg    *Config
-	mgr    *CollectionManager
-	auth   *Authenticator
-	log    *slog.Logger
-	http   *http.Server
+	cfg  *Config
+	mgr  *CollectionManager
+	auth *Authenticator
+	log  *slog.Logger
+	http *http.Server
 }
 
 // New constructs a Server from cfg. It initializes the zvec client, prepares

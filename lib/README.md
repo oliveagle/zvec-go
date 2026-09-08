@@ -1,91 +1,76 @@
-# zvec Static Libraries
+# zvec Native Libraries (C API)
 
-Pre-built static libraries for zvec Go client (CGO binding).
+Prebuilt, self-contained shared libraries for the zvec Go client's optional
+CGO binding (../cgo). Each library is the official zvec C API build
+(`zvec_c_api`) produced by the alibaba/zvec project: it embeds the entire
+C++ core plus all third-party dependencies, so binaries built against it have
+no runtime dependencies beyond system libraries (libc / libm / libpthread /
+libdl).
 
-## Library Naming Convention
+## Layout
 
-Libraries are named as: `libzvec_core-<os>-<arch>.a`
+    lib/
+    ├── linux-x86_64/libzvec_c_api.so    # Linux x86_64
+    ├── linux-arm64/libzvec_c_api.so     # Linux ARM64
+    ├── macos-arm64/libzvec_c_api.dylib  # macOS Apple Silicon
+    └── data/jieba_dict/                 # FTS tokenizer data (all platforms)
+        ├── jieba.dict.utf8
+        └── hmm_model.utf8
 
-| OS | Architecture | Library File |
-|----|--------------|--------------|
-| Linux | x86_64 | `libzvec_core-linux-x86_64.a` |
-| macOS | arm64 (Apple Silicon) | `libzvec_core-macos-arm64.a` |
-| macOS | x86_64 (Intel) | `libzvec_core-macos-x86_64.a` |
-| Windows | x86_64 | `libzvec_core-windows-x86_64.lib` |
-
-## Auxiliary Libraries
-
-| OS | Architecture | Library File |
-|----|--------------|--------------|
-| Linux | x86_64 | `libzvec_ailego-linux-x86_64.a` |
-| macOS | arm64 | `libzvec_ailego-macos-arm64.a` |
-| macOS | x86_64 | `libzvec_ailego-macos-x86_64.a` |
-| Windows | x86_64 | `libzvec_ailego-windows-x86_64.lib` |
+The file name must stay `libzvec_c_api.{so,dylib}` (it equals the library's
+SONAME) because the cgo build rules link the file directly and set
+`-Wl,-rpath` to the per-platform subdirectory, so the dynamic loader finds it
+next to the binary layout at runtime. Do not rename or add platform suffixes.
 
 ## zvec version
 
-Libraries are built from the `zvec` C++ submodule, which is pinned to a specific
-version in this repository (currently **v0.7.0** — see `zvec/`). The exact source
-commit is recorded in the `zvec` gitlink.
-
-Libraries are rebuilt and committed automatically by the
-[`build-zvec-static-libraries`](../.github/workflows/build-zvec-static-libraries.yml)
-GitHub Actions workflow whenever the `zvec/` submodule or the workflow changes, so the
-checked-in `.a` files track the pinned zvec version. The filename convention below
-(`libzvec_core-<os>-<arch>.a`) is what the CGO build tags in `../cgo/` link against;
-the `*-<git-hash>.a` variants are historical artifacts from manual builds.
+The libraries correspond to the zvec C++ submodule pinned in this repository
+(currently **v0.7.0** — see `zvec/` and the zvec gitlink). They are the
+prebuilt SDK assets of the matching alibaba/zvec GitHub release
+(`zvec-sdk-<platform>.tar.gz`), not a from-source build of this checkout.
+When the submodule moves to a new version, re-download the matching release
+SDKs and replace the files here (see
+[`build-zvec-native-libraries`](../.github/workflows/build-zvec-native-libraries.yml)
+for the automated flow).
 
 ## Usage
 
-### Linux
+The CGO binding is optional; the pure-Go client (root package) and the HTTP
+service (`./server`, `./cmd/zvec-httpd`) do not need these libraries.
 
 ```bash
-# Install dependencies
-sudo apt-get install -y cmake build-essential
-
-# Build from source or download pre-built library
-# Library path: lib/libzvec_core-linux-x86_64.a
+# Build/test the CGO binding (requires a C compiler, e.g. gcc/clang):
+CGO_ENABLED=1 go build -tags 'cgo zvec_cgo' ./cgo/
+CGO_ENABLED=1 go test -tags 'cgo zvec_cgo' -v ./cgo/
 ```
 
-### macOS
+The cgo flags in `../cgo/collection_cgo.go` link the per-platform library and
+embed an rpath pointing at its subdirectory, so no `LD_LIBRARY_PATH` or
+`DYLD_LIBRARY_PATH` setup is needed.
 
-```bash
-# Install dependencies
-brew install cmake
+### Full-text search (jieba) data
 
-# For Apple Silicon (M1/M2)
-# Library path: lib/libzvec_core-macos-arm64.a
+The FTS pipeline uses the jieba tokenizer, which reads
+`lib/data/jieba_dict/jieba.dict.utf8` and `hmm_model.utf8` at runtime. Point
+the environment variable `ZVEC_JIEBA_DICT_DIR` at `lib/data/jieba_dict`
+(absolute path recommended) before running applications that use FTS
+indexes.
 
-# For Intel Mac
-# Library path: lib/libzvec_core-macos-x86_64.a
-```
+## Provenance / updating the libraries
 
-### Windows
+1. Find the zvec version this repo pins to: `git describe --tags --exact-match zvec/`
+   (or `cd zvec && git describe --tags --exact-match HEAD`).
+2. Download the release assets for that tag from
+   `https://github.com/alibaba/zvec/releases` — one per platform:
+   `zvec-sdk-linux-amd64.tar.gz`, `zvec-sdk-linux-arm64.tar.gz`,
+   `zvec-sdk-osx-arm64.tar.gz`.
+3. From each archive keep only `libzvec_c_api.{so,dylib}` (and
+   `data/jieba_dict/*` for the data directory) and place them under the
+   matching `lib/<platform>/` subdirectory above.
+4. Run `CGO_ENABLED=1 go test -tags 'cgo zvec_cgo' -v ./cgo/` on the target
+   platform to verify, then commit.
 
-```powershell
-# Install Visual Studio 2022 with C++ workload
-# Install CMake
-
-# Library path: lib/libzvec_core-windows-x86_64.lib
-```
-
-## CGO Linking
-
-The Go client uses CGO to link against these static libraries:
-
-```go
-/*
-#cgo CFLAGS: -I./zvec/src/include
-#cgo LDFLAGS: -L./lib -lzvec_core -lzvec_ailego -lstdc++ -lpthread -lm
-*/
-import "C"
-```
-
-## Build from GitHub Actions
-
-Libraries are automatically built and committed to this repository by the
-`build-zvec-static-libraries.yml` GitHub Actions workflow.
-
-Triggered by:
-- Push to `main` branch (when zvec/ submodule or workflow file changes)
-- Manual trigger via GitHub Actions UI
+The GitHub Actions workflow
+[`build-zvec-native-libraries.yml`](../.github/workflows/build-zvec-native-libraries.yml)
+automates steps 1–4 and commits the result when the `zvec/` submodule or the
+workflow itself changes.

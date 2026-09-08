@@ -2,6 +2,7 @@ package zvec
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 )
 
@@ -25,6 +26,10 @@ const (
 	StatusCodePermissionDenied
 	StatusCodeResourceExhausted
 )
+
+// ErrDocNotFound is returned by operations on a document that does not
+// exist (e.g. Delete). HTTP handlers map it to 404.
+var ErrDocNotFound = errors.New("document not found")
 
 // Status represents the result of an operation.
 type Status struct {
@@ -66,14 +71,14 @@ type DataType string
 
 const (
 	// Scalar data types
-	DataTypeInt32     DataType = "INT32"
-	DataTypeInt64     DataType = "INT64"
-	DataTypeUInt32    DataType = "UINT32"
-	DataTypeUInt64    DataType = "UINT64"
-	DataTypeFloat     DataType = "FLOAT"
-	DataTypeDouble    DataType = "DOUBLE"
-	DataTypeString    DataType = "STRING"
-	DataTypeBool      DataType = "BOOL"
+	DataTypeInt32       DataType = "INT32"
+	DataTypeInt64       DataType = "INT64"
+	DataTypeUInt32      DataType = "UINT32"
+	DataTypeUInt64      DataType = "UINT64"
+	DataTypeFloat       DataType = "FLOAT"
+	DataTypeDouble      DataType = "DOUBLE"
+	DataTypeString      DataType = "STRING"
+	DataTypeBool        DataType = "BOOL"
 	DataTypeArrayInt32  DataType = "ARRAY_INT32"
 	DataTypeArrayInt64  DataType = "ARRAY_INT64"
 	DataTypeArrayUInt32 DataType = "ARRAY_UINT32"
@@ -84,10 +89,10 @@ const (
 	DataTypeArrayBool   DataType = "ARRAY_BOOL"
 
 	// Vector data types
-	DataTypeVectorFP16     DataType = "VECTOR_FP16"
-	DataTypeVectorFP32     DataType = "VECTOR_FP32"
-	DataTypeVectorFP64     DataType = "VECTOR_FP64"
-	DataTypeVectorInt8     DataType = "VECTOR_INT8"
+	DataTypeVectorFP16       DataType = "VECTOR_FP16"
+	DataTypeVectorFP32       DataType = "VECTOR_FP32"
+	DataTypeVectorFP64       DataType = "VECTOR_FP64"
+	DataTypeVectorInt8       DataType = "VECTOR_INT8"
 	DataTypeSparseVectorFP16 DataType = "SPARSE_VECTOR_FP16"
 	DataTypeSparseVectorFP32 DataType = "SPARSE_VECTOR_FP32"
 )
@@ -132,8 +137,8 @@ const (
 type MetricType string
 
 const (
-	MetricTypeL2   MetricType = "L2"
-	MetricTypeIP   MetricType = "IP"
+	MetricTypeL2     MetricType = "L2"
+	MetricTypeIP     MetricType = "IP"
 	MetricTypeCOSINE MetricType = "COSINE"
 )
 

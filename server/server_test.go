@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/oliveagle/zvec-go"
@@ -282,5 +283,86 @@ func TestUIServed(t *testing.T) {
 	defer res2.Body.Close()
 	if res2.StatusCode != http.StatusNotFound {
 		t.Fatalf("/api/nope: got %d, want 404", res2.StatusCode)
+	}
+}
+
+func TestDocIDPathTraversalRejectedViaHTTP(t *testing.T) {
+	ts := newTestServer(t, adminUsers())
+
+	// Create a collection first.
+	body := createCollectionRequest{
+		Name:   "trav",
+		Fields: []fieldSpec{{Name: "f", DataType: "STRING"}},
+	}
+	if code, b := do(t, ts, "POST", "/api/v1/collections", "admin", "admin", body); code != http.StatusCreated {
+		t.Fatalf("create: got %d: %s", code, b)
+	}
+
+	// Malicious doc IDs must be rejected by the upsert endpoint.
+	for _, id := range []string{"../pwned", "../../pwned", "a/../pwned", "sub/../pwned", ".."} {
+		up := upsertRequest{Document: &documentSpec{ID: id, Fields: map[string]interface{}{"f": "v"}}}
+		code, _ := do(t, ts, "POST", "/api/v1/collections/trav/documents", "admin", "admin", up)
+		if code == http.StatusOK {
+			t.Errorf("ID %q was accepted by HTTP upsert (path traversal!)", id)
+		}
+	}
+
+	// GET with traversal ID must not 200.
+	for _, id := range []string{"../pwned", "../../pwned"} {
+		code, _ := do(t, ts, "GET", "/api/v1/collections/trav/documents/"+id, "admin", "admin", nil)
+		if code == http.StatusOK {
+			t.Errorf("GET with ID %q returned 200 (path traversal!)", id)
+		}
+	}
+}
+
+func TestDeleteMissingDocumentReturns404(t *testing.T) {
+	ts := newTestServer(t, adminUsers())
+	body := createCollectionRequest{Name: "items", Fields: []fieldSpec{{Name: "n", DataType: "INT64"}}}
+	if code, b := do(t, ts, "POST", "/api/v1/collections", "admin", "admin", body); code != http.StatusCreated {
+		t.Fatalf("create: got %d: %s", code, b)
+	}
+	up := upsertRequest{Documents: []documentSpec{{ID: "i1", Fields: map[string]interface{}{"n": 7}}}}
+	if code, b := do(t, ts, "POST", "/api/v1/collections/items/documents", "admin", "admin", up); code != http.StatusOK {
+		t.Fatalf("upsert: got %d: %s", code, b)
+	}
+	// Deleting a document that never existed must be 404, not 500.
+	if code, b := do(t, ts, "DELETE", "/api/v1/collections/items/documents/ghost", "admin", "admin", nil); code != http.StatusNotFound {
+		t.Fatalf("delete missing: got %d: %s, want 404", code, b)
+	}
+	// Existing doc deletes fine; deleting it again is 404.
+	if code, b := do(t, ts, "DELETE", "/api/v1/collections/items/documents/i1", "admin", "admin", nil); code != http.StatusNoContent {
+		t.Fatalf("delete existing: got %d: %s, want 204", code, b)
+	}
+	if code, b := do(t, ts, "DELETE", "/api/v1/collections/items/documents/i1", "admin", "admin", nil); code != http.StatusNotFound {
+		t.Fatalf("re-delete: got %d: %s, want 404", code, b)
+	}
+}
+
+func TestDecodeBodyRejectsTrailingGarbage(t *testing.T) {
+	ts := newTestServer(t, adminUsers())
+	body := createCollectionRequest{Name: "garb", Fields: []fieldSpec{{Name: "n", DataType: "INT64"}}}
+	if code, b := do(t, ts, "POST", "/api/v1/collections", "admin", "admin", body); code != http.StatusCreated {
+		t.Fatalf("create: got %d: %s", code, b)
+	}
+	raw := `{"id":"x1","fields":{"n":1}}TRAILING GARBAGE`
+	req, err := http.NewRequest("POST", ts.URL+"/api/v1/collections/garb/documents", strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.SetBasicAuth("admin", "admin")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("trailing garbage: got %d, want 400", res.StatusCode)
+	}
+	// A well-formed body on the same endpoint still works.
+	if code, b := do(t, ts, "POST", "/api/v1/collections/garb/documents", "admin", "admin",
+		upsertRequest{Documents: []documentSpec{{ID: "x2", Fields: map[string]interface{}{"n": 2}}}}); code != http.StatusOK {
+		t.Fatalf("valid upsert: got %d: %s", code, b)
 	}
 }
