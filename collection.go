@@ -247,12 +247,19 @@ func (c *Collection) Search(query *VectorQuery) ([]*SearchResult, error) {
 		return nil, err
 	}
 
-	// Get query vector
+	// Get query vector. Check the in-memory map first (a document may not be
+	// persisted yet) and fall back to disk, mirroring Query.
 	var queryVec []float32
 	if query.HasID() {
-		doc, err := c.readDocument(query.ID)
-		if err != nil {
-			return nil, fmt.Errorf("document not found: %s", query.ID)
+		var doc *Document
+		if d, ok := c.docs[query.ID]; ok {
+			doc = d
+		} else {
+			d, err := c.readDocument(query.ID)
+			if err != nil {
+				return nil, fmt.Errorf("document not found: %s", query.ID)
+			}
+			doc = d
 		}
 		vec, ok := doc.Vectors[query.FieldName]
 		if !ok {
@@ -715,6 +722,9 @@ func (c *Collection) AddColumn(fieldSchema *FieldSchema, expression string, opti
 	if fieldSchema == nil {
 		return fmt.Errorf("field schema cannot be nil")
 	}
+	if err := fieldSchema.Validate(); err != nil {
+		return err
+	}
 
 	// Check for duplicate field name
 	for _, f := range c.schema.Fields {
@@ -728,16 +738,16 @@ func (c *Collection) AddColumn(fieldSchema *FieldSchema, expression string, opti
 		}
 	}
 
-	// Add field to schema
-	c.schema.AddField(fieldSchema)
-
-	// TODO: Apply expression to existing documents
+	// Add field to schema. Note: the expression parameter is not evaluated;
+	// existing documents keep no value for the new column until written again.
 	_ = expression
 	_ = option
+	c.schema.AddField(fieldSchema)
 	return c.persistSchema()
 }
 
-// DropColumn removes a column from the collection.
+// DropColumn removes a column from the collection and from every existing
+// document, so the column (and its data) cannot resurface on restart.
 func (c *Collection) DropColumn(fieldName string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -747,18 +757,37 @@ func (c *Collection) DropColumn(fieldName string) error {
 	}
 
 	// Remove field from schema
+	found := false
 	for i, f := range c.schema.Fields {
 		if f.Name == fieldName {
 			c.schema.Fields = append(c.schema.Fields[:i], c.schema.Fields[i+1:]...)
-			return c.persistSchema()
+			found = true
+			break
 		}
 	}
+	if !found {
+		return fmt.Errorf("field not found: %s", fieldName)
+	}
 
-	return fmt.Errorf("field not found: %s", fieldName)
+	// Scrub the value from every document and persist the change.
+	for id, doc := range c.docs {
+		if _, ok := doc.Fields[fieldName]; !ok {
+			continue
+		}
+		delete(doc.Fields, fieldName)
+		if err := c.writeDocument(doc); err != nil {
+			return err
+		}
+		_ = id
+	}
+	return c.persistSchema()
 }
 
-// AlterColumn renames a column or updates its schema.
-// This operation only supports scalar numeric columns.
+// AlterColumn renames a column or updates its schema. Renaming moves the
+// stored value of every existing document to the new key so the data cannot
+// be lost on restart. Changing the declared data type does not convert
+// already-stored values (best-effort: values that no longer match the new
+// type remain as written).
 func (c *Collection) AlterColumn(oldName string, newName string, fieldSchema *FieldSchema, option *AlterColumnOption) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -766,11 +795,34 @@ func (c *Collection) AlterColumn(oldName string, newName string, fieldSchema *Fi
 	if c.closed {
 		return fmt.Errorf("collection is closed")
 	}
+	_ = option
+
+	if newName != "" && newName != oldName {
+		for _, f := range c.schema.Fields {
+			if f.Name == newName {
+				return fmt.Errorf("field already exists: %s", newName)
+			}
+		}
+		for _, v := range c.schema.VectorFields {
+			if v.Name == newName {
+				return fmt.Errorf("field already exists: %s", newName)
+			}
+		}
+	}
 
 	// Find and update field
 	for _, f := range c.schema.Fields {
 		if f.Name == oldName {
 			if newName != "" {
+				for _, doc := range c.docs {
+					if val, ok := doc.Fields[oldName]; ok {
+						delete(doc.Fields, oldName)
+						doc.Fields[newName] = val
+						if err := c.writeDocument(doc); err != nil {
+							return err
+						}
+					}
+				}
 				f.Name = newName
 			}
 			if fieldSchema != nil {

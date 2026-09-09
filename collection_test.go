@@ -971,3 +971,177 @@ func TestDeleteMissingDocument(t *testing.T) {
 		t.Fatalf("Delete never-existed: %v; want ErrDocNotFound", err)
 	}
 }
+
+func TestCollectionDropColumnSurvivesRestart(t *testing.T) {
+	globalZvec = nil
+	once = sync.Once{}
+
+	tmpDir, err := os.MkdirTemp("", "zvec-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := Init(DefaultConfig()); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	schema := NewCollectionSchema("ddl")
+	schema.AddField(NewFieldSchema("keep", DataTypeInt64))
+	schema.AddField(NewFieldSchema("dropme", DataTypeString))
+
+	collPath := filepath.Join(tmpDir, "ddl")
+	coll, err := CreateAndOpen(collPath, schema, nil)
+	if err != nil {
+		t.Fatalf("CreateAndOpen failed: %v", err)
+	}
+	doc := NewDocument("d1")
+	doc.SetField("keep", int64(1))
+	doc.SetField("dropme", "bye")
+	if err := coll.Insert(doc); err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	if err := coll.DropColumn("dropme"); err != nil {
+		t.Fatalf("DropColumn failed: %v", err)
+	}
+
+	// Reopen from disk: the dropped column's value must not resurface.
+	coll.Close()
+	reopened, err := Open(collPath, nil)
+	if err != nil {
+		t.Fatalf("Reopen failed: %v", err)
+	}
+	defer reopened.Close()
+
+	got, err := reopened.Get("d1")
+	if err != nil {
+		t.Fatalf("Get after reopen failed: %v", err)
+	}
+	if _, has := got.Fields["dropme"]; has {
+		t.Error("dropped column value resurfaced after restart")
+	}
+	if v, ok := got.Fields["keep"]; !ok || numericValue(v) != 1 {
+		t.Errorf("keep field after reopen = %v (%T), ok=%v; want 1", v, v, ok)
+	}
+}
+
+// numericValue returns the numeric value of a JSON-decoded interface{} value.
+// JSON round-trips turn int64 into float64, so both are accepted.
+func numericValue(v interface{}) float64 {
+	switch n := v.(type) {
+	case int64:
+		return float64(n)
+	case int:
+		return float64(n)
+	case float64:
+		return n
+	case float32:
+		return float64(n)
+	}
+	return -1
+}
+
+func TestCollectionAlterColumnRenameSurvivesRestart(t *testing.T) {
+	globalZvec = nil
+	once = sync.Once{}
+
+	tmpDir, err := os.MkdirTemp("", "zvec-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := Init(DefaultConfig()); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	schema := NewCollectionSchema("ren")
+	schema.AddField(NewFieldSchema("oldname", DataTypeInt64))
+
+	collPath := filepath.Join(tmpDir, "ren")
+	coll, err := CreateAndOpen(collPath, schema, nil)
+	if err != nil {
+		t.Fatalf("CreateAndOpen failed: %v", err)
+	}
+	doc := NewDocument("d1")
+	doc.SetField("oldname", int64(42))
+	if err := coll.Insert(doc); err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	if err := coll.AlterColumn("oldname", "newname", nil, nil); err != nil {
+		t.Fatalf("AlterColumn failed: %v", err)
+	}
+	// Renaming onto an existing field name must be rejected.
+	schema.AddField(NewFieldSchema("other", DataTypeInt64))
+	if err := coll.AlterColumn("newname", "other", nil, nil); err == nil {
+		t.Error("expected error renaming onto an existing field name")
+	}
+
+	coll.Close()
+	reopened, err := Open(collPath, nil)
+	if err != nil {
+		t.Fatalf("Reopen failed: %v", err)
+	}
+	defer reopened.Close()
+
+	got, err := reopened.Get("d1")
+	if err != nil {
+		t.Fatalf("Get after reopen failed: %v", err)
+	}
+	if v, ok := got.Fields["newname"]; !ok || numericValue(v) != 42 {
+		t.Errorf("renamed field after reopen = %v (%T), ok=%v; want 42", v, v, ok)
+	}
+	if _, has := got.Fields["oldname"]; has {
+		t.Error("old field name still present after rename+restart")
+	}
+}
+
+func TestCollectionSearchByDocIDUsesMemory(t *testing.T) {
+	globalZvec = nil
+	once = sync.Once{}
+
+	tmpDir, err := os.MkdirTemp("", "zvec-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := Init(DefaultConfig()); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	schema := NewCollectionSchema("memsearch")
+	schema.AddVectorField(NewVectorSchema("emb", DataTypeVectorFP32, 2))
+
+	collPath := filepath.Join(tmpDir, "memsearch")
+	coll, err := CreateAndOpen(collPath, schema, nil)
+	if err != nil {
+		t.Fatalf("CreateAndOpen failed: %v", err)
+	}
+	defer coll.Close()
+
+	d1 := NewDocument("q")
+	d1.SetVector("emb", []float32{1, 0})
+	if err := coll.Insert(d1); err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+	d2 := NewDocument("other")
+	d2.SetVector("emb", []float32{0, 1})
+	if err := coll.Insert(d2); err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+
+	// Delete the query document's backing file so only the in-memory copy
+	// exists; a memory-first lookup must still find it.
+	os.Remove(filepath.Join(collPath, "docs", "q.json"))
+
+	res, err := coll.Search(NewVectorQueryByID("emb", "q"))
+	if err != nil {
+		t.Fatalf("Search by ID (memory-only doc) failed: %v", err)
+	}
+	if len(res) != 2 || res[0].ID != "q" {
+		t.Fatalf("unexpected search results: %+v", res)
+	}
+}
