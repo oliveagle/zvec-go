@@ -396,7 +396,9 @@ func (d *Document) PK() string {
 	return C.GoString(cp)
 }
 
-// Score returns the last search score assigned to the document.
+// Score returns the last search score assigned to the document by a Query.
+// See Query for the metric-dependent meaning (higher-is-better for IP,
+// lower-is-better for L2/COSINE).
 func (d *Document) Score() float64 {
 	if err := d.check(); err != nil {
 		return 0
@@ -672,9 +674,14 @@ func (c *Collection) Delete(ids ...string) (removed, failed int, err error) {
 	return int(ok), int(fail), nil
 }
 
-// Query runs a vector similarity search and returns the result documents.
-// The returned *Document values own their native documents; Free them (or let
-// their finalizers run) when done.
+// Query runs a vector similarity search and returns the result documents in
+// rank order (best first). The returned *Document values own their native
+// documents; Free them (or let their finalizers run) when done.
+//
+// Score semantics follow the zvec core, not the pure-Go client: for IP the
+// score is the raw dot product (higher is better); for L2 and COSINE it is a
+// distance (LOWER is better — an exact cosine match scores 0). Compare
+// scores within the same metric only.
 func (c *Collection) Query(q *Query) (docs []*Document, err error) {
 	if err := c.check(); err != nil {
 		return nil, err
