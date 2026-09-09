@@ -57,7 +57,12 @@ type Config struct {
 	Auth    AuthConfig    `json:"auth"`
 }
 
-// DefaultConfig returns a safe default configuration.
+// DefaultConfig returns a usable default configuration.
+//
+// Authentication is disabled by default and New logs a prominent warning
+// about it; services that need auth must set Auth.Enabled and provide at
+// least one user (an enabled config with no users cannot start, because
+// nobody would be able to log in).
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
@@ -67,7 +72,7 @@ func DefaultConfig() *Config {
 			ShutdownTimeoutSeconds: 10,
 		},
 		Storage: StorageConfig{DataDir: "./data"},
-		Auth:    AuthConfig{Enabled: true},
+		Auth:    AuthConfig{Enabled: false},
 	}
 }
 

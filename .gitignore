@@ -41,3 +41,11 @@ Thumbs.db
 
 # Default service data directory
 /data/
+
+# Mutation-testing cache (gomut)
+.gomut-cache/
+
+# Server test artifacts (created when tests run against the default
+# relative data directory)
+server/data/
+server/events/

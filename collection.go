@@ -2,6 +2,7 @@ package zvec
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -179,7 +180,7 @@ func (c *Collection) Get(id string) (*Document, error) {
 	// cache here while holding a read lock to avoid a write under RLock.
 	doc, err := c.readDocument(id)
 	if err != nil {
-		return nil, fmt.Errorf("document not found: %s: %w", id, ErrDocNotFound)
+		return nil, fmt.Errorf("document not found: %s: %w", id, errors.Join(ErrDocNotFound, err))
 	}
 	return doc, nil
 }
@@ -200,7 +201,7 @@ func (c *Collection) Delete(id string) error {
 	if _, ok := c.docs[id]; !ok {
 		// Not in memory; check the on-disk representation before deciding.
 		if _, err := os.Stat(c.docPath(id)); err != nil {
-			return fmt.Errorf("document not found: %s: %w", id, ErrDocNotFound)
+			return fmt.Errorf("document not found: %s: %w", id, errors.Join(ErrDocNotFound, err))
 		}
 	}
 	delete(c.docs, id)
@@ -257,7 +258,7 @@ func (c *Collection) Search(query *VectorQuery) ([]*SearchResult, error) {
 		} else {
 			d, err := c.readDocument(query.ID)
 			if err != nil {
-				return nil, fmt.Errorf("document not found: %s: %w", query.ID, ErrDocNotFound)
+				return nil, fmt.Errorf("document not found: %s: %w", query.ID, errors.Join(ErrDocNotFound, err))
 			}
 			doc = d
 		}
@@ -969,7 +970,7 @@ func (c *Collection) Query(query *VectorQuery, topk int, filter string, includeV
 			var err error
 			doc, err = c.readDocument(query.ID)
 			if err != nil {
-				return nil, fmt.Errorf("document not found: %s: %w", query.ID, ErrDocNotFound)
+				return nil, fmt.Errorf("document not found: %s: %w", query.ID, errors.Join(ErrDocNotFound, err))
 			}
 		}
 		vec, ok := doc.Vectors[query.FieldName]
